@@ -339,7 +339,25 @@ input[type="range"] {
   white-space: nowrap;
 }
 .pond-card .pc-meta { font-size: 0.8rem; color: var(--text-dim); }
-.pond-card .pc-arrow { color: var(--teal); font-size: 1.2rem; }
+.pond-card .pc-arrow { color: var(--teal); font-size: 1.2rem; align-self: center; }
+
+/* Little info chips under each pond name (age + fishability) */
+.pc-tags { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
+.pc-chip {
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(11, 211, 211, 0.12);
+  border: 1px solid rgba(11, 211, 211, 0.3);
+  color: var(--text);
+  white-space: nowrap;
+}
+.pc-chip--fish {
+  background: rgba(255, 209, 102, 0.14);
+  border-color: rgba(255, 209, 102, 0.4);
+  color: var(--gold);
+}
 @keyframes floatIn {
   from { opacity: 0; transform: translateY(10px); }
   to   { opacity: 1; transform: translateY(0);    }
@@ -402,6 +420,38 @@ input[type="range"] {
   align-items: center;
   gap: 8px;
 }
+
+/* Fishability score + meter */
+.fish-score {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 6px 0 4px;
+}
+.score-num {
+  font-size: 2.4rem;
+  font-weight: 800;
+  line-height: 1;
+  color: var(--gold);
+  text-shadow: 0 0 20px rgba(255, 209, 102, 0.4);
+}
+.score-num span { font-size: 1rem; color: var(--text-dim); font-weight: 600; }
+.score-side { flex: 1; }
+.score-meter { display: flex; gap: 4px; margin-bottom: 6px; }
+.score-meter .mb {
+  flex: 1;
+  height: 14px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  transition: background 0.3s;
+}
+.score-meter .mb.on {
+  background: linear-gradient(180deg, var(--aqua), var(--teal));
+  box-shadow: 0 0 8px rgba(11, 211, 211, 0.5);
+  animation: barPop 0.4s ease both;
+}
+@keyframes barPop { from { transform: scaleY(0.3); opacity: 0.4; } }
+.score-label { font-size: 0.85rem; font-weight: 700; color: var(--aqua); }
 
 /* Age timeline bar */
 .age-timeline {

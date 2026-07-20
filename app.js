@@ -57,10 +57,13 @@ function initMap() {
   // Start centered on the continental United States.
   const map = L.map("map", { zoomControl: true }).setView([39.5, -98.35], 4);
 
-  // Free OpenStreetMap tiles.
-  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    maxZoom: 19,
-    attribution: "&copy; OpenStreetMap contributors",
+  // Crisp map tiles from CARTO. The "{r}" becomes "@2x" on high-resolution
+  // phone screens, so the map looks sharp instead of blurry. Water bodies show
+  // clearly in blue, which is exactly what we care about here.
+  L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png", {
+    maxZoom: 20,
+    subdomains: "abcd",
+    attribution: "&copy; OpenStreetMap contributors &copy; CARTO",
   }).addTo(map);
 
   // Clicking anywhere on the map runs a search there.
@@ -205,10 +208,11 @@ async function findPonds(lat, lon, radiusMeters) {
   for (const el of data.elements || []) {
     const tags = el.tags || {};
 
-    // Work out a center point + size from whatever geometry we got.
+    // Work out a center point + size + outline from whatever geometry we got.
     let center = null;
     let areaM2 = 0;
     let perimeterM = 0;
+    let bounds = null; // the water body's bounding box, so we can frame it on the map
 
     if (Array.isArray(el.geometry) && el.geometry.length >= 3) {
       // A "way" (single closed shape): geometry is a list of {lat, lon} points.
@@ -216,7 +220,9 @@ async function findPonds(lat, lon, radiusMeters) {
       areaM2 = m.areaM2;
       perimeterM = m.perimeterM;
       center = centroidOf(el.geometry);
+      bounds = boundsOf(el.geometry);
     }
+    if (!bounds && el.bounds) bounds = el.bounds;
     if (!center && el.bounds) {
       // A "relation" (multi-part shape) gives us a bounding box — use its middle.
       center = {
@@ -242,6 +248,7 @@ async function findPonds(lat, lon, radiusMeters) {
       lon: center.lon,
       areaM2,
       perimeterM,
+      bounds,
       tags,
       distanceM: haversine(lat, lon, center.lat, center.lon),
     });
@@ -277,6 +284,59 @@ function centroidOf(points) {
     lonSum += p.lon;
   }
   return { lat: latSum / points.length, lon: lonSum / points.length };
+}
+
+// Smallest box that contains all the points (the water body's outline extent).
+function boundsOf(points) {
+  let minlat = 90, minlon = 180, maxlat = -90, maxlon = -180;
+  for (const p of points) {
+    if (p.lat < minlat) minlat = p.lat;
+    if (p.lat > maxlat) maxlat = p.lat;
+    if (p.lon < minlon) minlon = p.lon;
+    if (p.lon > maxlon) maxlon = p.lon;
+  }
+  return { minlat, minlon, maxlat, maxlon };
+}
+
+/* =========================================================================
+   FISHABILITY SCORE (1–10)
+   An honest ESTIMATE of how many bites you might get. Starts from the water
+   body's size and type (habitat), then — when we have real GBIF fish data —
+   nudges it up for more species / more recorded sightings.
+   ========================================================================= */
+function computeFishability(pond, fish) {
+  const type = (pond.type || "").toLowerCase();
+  const area = pond.areaM2 || 0;
+
+  // Base score from surface area (bigger water usually = more fish).
+  let score;
+  if (area <= 0) score = 5;              // unknown size → neutral
+  else if (area < 500) score = 3;        // tiny
+  else if (area < 5000) score = 5;       // small pond
+  else if (area < 50000) score = 7;      // healthy pond
+  else if (area < 500000) score = 8;     // small lake
+  else score = 7;                        // big water: lots of fish but spread out
+
+  // Type adjustments.
+  if (type.includes("pond")) score += 1;         // classic bass/bluegill water
+  else if (type.includes("reservoir")) score += 1;
+  else if (type.includes("wetland") || type.includes("canal")) score -= 1;
+
+  let reason;
+  if (fish && fish.badge === "real") {
+    const species = fish.list.length;
+    const sightings = fish.list.reduce((s, f) => s + (f.count || 0), 0);
+    if (species >= 6 || sightings >= 40) score += 2;
+    else if (species >= 3 || sightings >= 10) score += 1;
+    reason = `Based on the habitat plus ${species} fish species and ${sightings} recorded sighting${sightings === 1 ? "" : "s"} nearby.`;
+  } else {
+    reason = "Estimated from the water body's size and type. Tap in for fish data to refine it.";
+  }
+
+  score = Math.max(1, Math.min(10, Math.round(score)));
+  const labels = ["", "Very slow", "Poor", "Slow", "Below average", "Fair",
+                  "Decent", "Good", "Very good", "Excellent", "Prime spot"];
+  return { score, label: labels[score], reason };
 }
 
 // Given a list of {lat, lon} shoreline points, estimate surface area (m²) using
@@ -467,6 +527,9 @@ function renderList(ponds) {
 
   els.list.innerHTML = "";
   ponds.forEach((pond, i) => {
+    const age = estimateAge(pond);            // how old (real or estimated)
+    const fscore = computeFishability(pond);  // 1–10 habitat estimate
+
     const card = document.createElement("div");
     card.className = "pond-card";
     card.style.animationDelay = (i * 0.04) + "s";
@@ -478,6 +541,10 @@ function renderList(ponds) {
           ${prettyType(pond.type)} &middot;
           ${formatDistance(pond.distanceM)} away
           ${pond.areaM2 ? "&middot; " + formatArea(pond.areaM2) : ""}
+        </div>
+        <div class="pc-tags">
+          <span class="pc-chip">⏳ ${age.text}</span>
+          <span class="pc-chip pc-chip--fish">🎣 ${fscore.score}/10</span>
         </div>
       </div>
       <div class="pc-arrow">›</div>`;
@@ -495,7 +562,18 @@ async function selectPond(pond) {
     const dot = m.marker.getElement()?.querySelector(".pond-marker");
     if (dot) dot.classList.toggle("active", m.pond.id === pond.id);
   });
-  state.map.setView([pond.lat, pond.lon], 15, { animate: true });
+
+  // Frame the whole water body (using its real outline) so you actually land
+  // ON the water, not just near it. Fall back to a plain center if we have no
+  // outline for this shape.
+  if (pond.bounds) {
+    state.map.fitBounds(
+      [[pond.bounds.minlat, pond.bounds.minlon], [pond.bounds.maxlat, pond.bounds.maxlon]],
+      { padding: [60, 60], maxZoom: 17, animate: true }
+    );
+  } else {
+    state.map.setView([pond.lat, pond.lon], 15, { animate: true });
+  }
 
   const age = estimateAge(pond);
 
@@ -550,6 +628,12 @@ function detailHtml(pond, age, fish, loadingFish) {
         .join("");
 
   const depthNote = estimateDepthNote(pond);
+  const fscore = computeFishability(pond, loadingFish ? null : fish);
+
+  // Ten little bars, filled up to the score.
+  const meterBars = Array.from({ length: 10 }, (_, i) =>
+    `<span class="mb ${i < fscore.score ? "on" : ""}"></span>`
+  ).join("");
 
   return `
     <button class="back-btn">‹ Back to all ponds</button>
@@ -573,6 +657,18 @@ function detailHtml(pond, age, fish, loadingFish) {
         <div class="stat-label">Likely depth</div>
         <div class="stat-value">${depthNote.short}</div>
       </div>
+    </div>
+
+    <div class="detail-section">
+      <h3>🎣 Fishability <span class="badge badge-est">ESTIMATED</span></h3>
+      <div class="fish-score">
+        <div class="score-num">${fscore.score}<span>/10</span></div>
+        <div class="score-side">
+          <div class="score-meter">${meterBars}</div>
+          <div class="score-label">${fscore.label} — bites likely</div>
+        </div>
+      </div>
+      <p class="age-note">${escapeHtml(fscore.reason)}</p>
     </div>
 
     <div class="detail-section">

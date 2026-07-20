@@ -1,0 +1,525 @@
+/* =========================================================================
+   PondScope styles
+   A dark, aquatic, glowing theme. Heavily commented so a beginner can tweak it.
+   Change the colours in ":root" below to re-skin the whole app at once.
+   ========================================================================= */
+
+:root {
+  --deep:      #041322;   /* darkest background */
+  --deep-2:    #072b45;   /* mid background */
+  --teal:      #0bd3d3;   /* main glowing accent */
+  --aqua:      #35e0c0;   /* secondary accent */
+  --gold:      #ffd166;   /* highlight / "estimated" */
+  --coral:     #ff6b6b;   /* errors / warnings */
+  --text:      #eaf6ff;   /* main text */
+  --text-dim:  #9fc2d6;   /* secondary text */
+  --glass-bg:  rgba(9, 40, 62, 0.55);
+  --glass-brd: rgba(120, 220, 235, 0.25);
+  --radius:    16px;
+  --shadow:    0 10px 40px rgba(0, 0, 0, 0.45);
+  font-size: 16px;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  min-height: 100%;
+  color: var(--text);
+  font-family: "Segoe UI", system-ui, -apple-system, Roboto, Helvetica, Arial, sans-serif;
+  background: var(--deep);
+  overflow-x: hidden;
+}
+
+/* -------------------------------------------------------------------------
+   Animated background layers
+   ------------------------------------------------------------------------- */
+
+/* A slowly shifting deep-water gradient */
+.bg-water {
+  position: fixed;
+  inset: 0;
+  z-index: -3;
+  background:
+    radial-gradient(1200px 800px at 20% -10%, #0a3a5c 0%, transparent 60%),
+    radial-gradient(1000px 700px at 100% 10%, #0b4a55 0%, transparent 55%),
+    linear-gradient(180deg, var(--deep-2) 0%, var(--deep) 70%);
+  animation: hue 30s ease-in-out infinite alternate;
+}
+@keyframes hue {
+  0%   { filter: hue-rotate(0deg)   saturate(1);   }
+  100% { filter: hue-rotate(-18deg) saturate(1.2); }
+}
+
+/* Wavy "caustics" light lines drifting across, like sun through water */
+.bg-caustics {
+  position: fixed;
+  inset: -50%;
+  z-index: -2;
+  background:
+    repeating-linear-gradient(115deg, transparent 0 38px, rgba(11, 211, 211, 0.05) 38px 40px),
+    repeating-linear-gradient( 65deg, transparent 0 46px, rgba(53, 224, 192, 0.04) 46px 48px);
+  animation: drift 24s linear infinite;
+  opacity: 0.7;
+}
+@keyframes drift {
+  0%   { transform: translate(0, 0)      rotate(0deg); }
+  100% { transform: translate(-60px, 40px) rotate(4deg); }
+}
+
+/* Rising bubbles */
+.bg-bubbles {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+}
+.bg-bubbles span {
+  position: absolute;
+  bottom: -60px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 30% 30%, rgba(255,255,255,0.7), rgba(11,211,211,0.15));
+  animation: rise linear infinite;
+}
+.bg-bubbles span:nth-child(1) { left: 8%;  width: 8px;  height: 8px;  animation-duration: 14s; animation-delay: 0s;  }
+.bg-bubbles span:nth-child(2) { left: 20%; width: 20px; height: 20px; animation-duration: 20s; animation-delay: 3s;  }
+.bg-bubbles span:nth-child(3) { left: 33%; width: 10px; height: 10px; animation-duration: 16s; animation-delay: 6s;  }
+.bg-bubbles span:nth-child(4) { left: 47%; width: 16px; height: 16px; animation-duration: 22s; animation-delay: 1s;  }
+.bg-bubbles span:nth-child(5) { left: 58%; width: 7px;  height: 7px;  animation-duration: 12s; animation-delay: 5s;  }
+.bg-bubbles span:nth-child(6) { left: 66%; width: 22px; height: 22px; animation-duration: 24s; animation-delay: 8s;  }
+.bg-bubbles span:nth-child(7) { left: 74%; width: 11px; height: 11px; animation-duration: 18s; animation-delay: 2s;  }
+.bg-bubbles span:nth-child(8) { left: 82%; width: 9px;  height: 9px;  animation-duration: 15s; animation-delay: 7s;  }
+.bg-bubbles span:nth-child(9) { left: 90%; width: 18px; height: 18px; animation-duration: 21s; animation-delay: 4s;  }
+.bg-bubbles span:nth-child(10){ left: 96%; width: 6px;  height: 6px;  animation-duration: 13s; animation-delay: 9s;  }
+@keyframes rise {
+  0%   { transform: translateY(0)      scale(1);   opacity: 0;   }
+  10%  { opacity: 0.8; }
+  100% { transform: translateY(-105vh) scale(1.4); opacity: 0;   }
+}
+
+/* -------------------------------------------------------------------------
+   Reusable "glass" card look
+   ------------------------------------------------------------------------- */
+.glass {
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-brd);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+/* -------------------------------------------------------------------------
+   Header
+   ------------------------------------------------------------------------- */
+.app-header {
+  max-width: 1200px;
+  margin: 22px auto 14px;
+  padding: 0 18px;
+}
+.logo { display: flex; align-items: center; gap: 14px; }
+.logo-mark {
+  font-size: 44px;
+  filter: drop-shadow(0 0 12px rgba(11, 211, 211, 0.7));
+  animation: sway 4s ease-in-out infinite;
+}
+@keyframes sway {
+  0%, 100% { transform: rotate(-8deg); }
+  50%      { transform: rotate(8deg);  }
+}
+.logo-text h1 {
+  margin: 0;
+  font-size: 2rem;
+  letter-spacing: 0.5px;
+  background: linear-gradient(90deg, var(--teal), var(--aqua), var(--gold));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  text-shadow: 0 0 30px rgba(11, 211, 211, 0.3);
+}
+.logo-text p { margin: 2px 0 0; color: var(--text-dim); font-size: 0.9rem; }
+
+/* -------------------------------------------------------------------------
+   Search panel
+   ------------------------------------------------------------------------- */
+.search-panel {
+  max-width: 1200px;
+  margin: 0 auto 16px;
+  padding: 16px 18px;
+  width: calc(100% - 36px);
+}
+.search-row {
+  display: flex;
+  gap: 12px;
+  align-items: flex-end;
+  flex-wrap: wrap;
+}
+.search-row--radius { margin-top: 12px; align-items: center; }
+.field { display: flex; flex-direction: column; gap: 6px; flex: 1 1 320px; }
+.field--radius { flex: 1 1 260px; }
+.field-label { font-size: 0.8rem; color: var(--text-dim); }
+.field-label strong { color: var(--aqua); }
+
+#searchInput {
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--glass-brd);
+  background: rgba(2, 15, 26, 0.6);
+  color: var(--text);
+  font-size: 1rem;
+  outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+#searchInput:focus {
+  border-color: var(--teal);
+  box-shadow: 0 0 0 3px rgba(11, 211, 211, 0.2);
+}
+
+/* Range slider */
+input[type="range"] {
+  width: 100%;
+  accent-color: var(--teal);
+  cursor: pointer;
+}
+
+/* Buttons */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 18px;
+  border-radius: 12px;
+  border: 1px solid transparent;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.12s, box-shadow 0.2s, background 0.2s;
+  white-space: nowrap;
+}
+.btn:active { transform: translateY(1px) scale(0.99); }
+.btn-primary {
+  color: #022;
+  background: linear-gradient(90deg, var(--teal), var(--aqua));
+  box-shadow: 0 6px 20px rgba(11, 211, 211, 0.4);
+}
+.btn-primary:hover { box-shadow: 0 8px 28px rgba(11, 211, 211, 0.6); }
+.btn-ghost {
+  color: var(--text);
+  background: rgba(2, 15, 26, 0.5);
+  border-color: var(--glass-brd);
+}
+.btn-ghost:hover { border-color: var(--teal); }
+.hint { margin: 0; color: var(--text-dim); font-size: 0.8rem; flex: 1 1 240px; }
+
+/* -------------------------------------------------------------------------
+   Main layout: map + side panel
+   ------------------------------------------------------------------------- */
+.layout {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 18px 18px;
+  display: grid;
+  grid-template-columns: 1.5fr 1fr;
+  gap: 16px;
+  align-items: stretch;
+}
+
+.map-wrap {
+  position: relative;
+  overflow: hidden;
+  min-height: 520px;
+  padding: 6px;
+}
+#map {
+  width: 100%;
+  height: 100%;
+  min-height: 508px;
+  border-radius: 12px;
+  z-index: 1;
+}
+
+/* Radar scanning overlay */
+.scan-overlay {
+  position: absolute;
+  inset: 6px;
+  border-radius: 12px;
+  background: rgba(2, 12, 22, 0.55);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  z-index: 500;
+  backdrop-filter: blur(2px);
+}
+.radar {
+  position: relative;
+  width: 140px;
+  height: 140px;
+  border-radius: 50%;
+  border: 2px solid rgba(11, 211, 211, 0.35);
+  box-shadow: inset 0 0 30px rgba(11, 211, 211, 0.25);
+}
+.radar::before {
+  /* concentric rings */
+  content: "";
+  position: absolute;
+  inset: 28px;
+  border-radius: 50%;
+  border: 1px solid rgba(11, 211, 211, 0.3);
+}
+.radar::after {
+  /* the sweeping wedge */
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: conic-gradient(from 0deg, rgba(11, 211, 211, 0.55), transparent 40%);
+  animation: sweep 1.4s linear infinite;
+}
+@keyframes sweep { to { transform: rotate(360deg); } }
+.scan-text { color: var(--aqua); font-weight: 600; letter-spacing: 0.5px; }
+
+/* Side panel */
+.side {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  min-height: 520px;
+  max-height: 78vh;
+}
+.status-bar {
+  font-size: 0.9rem;
+  color: var(--text-dim);
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(2, 15, 26, 0.5);
+  border: 1px solid var(--glass-brd);
+  margin-bottom: 12px;
+}
+.status-bar.error   { color: #ffd7d7; border-color: rgba(255,107,107,0.5); }
+.status-bar.success { color: var(--aqua); border-color: rgba(53,224,192,0.5); }
+
+/* Scrollable results area */
+.pond-list, .pond-detail { overflow-y: auto; padding-right: 4px; }
+
+/* -------------------------------------------------------------------------
+   Pond list cards
+   ------------------------------------------------------------------------- */
+.pond-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  margin-bottom: 10px;
+  border-radius: 12px;
+  background: rgba(3, 22, 37, 0.6);
+  border: 1px solid var(--glass-brd);
+  cursor: pointer;
+  transition: transform 0.14s, border-color 0.2s, box-shadow 0.2s;
+  animation: floatIn 0.4s ease both;
+}
+.pond-card:hover {
+  transform: translateX(4px);
+  border-color: var(--teal);
+  box-shadow: 0 6px 20px rgba(11, 211, 211, 0.25);
+}
+.pond-card .drop {
+  font-size: 26px;
+  filter: drop-shadow(0 0 8px rgba(11, 211, 211, 0.6));
+}
+.pond-card .pc-body { flex: 1; min-width: 0; }
+.pond-card .pc-name {
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pond-card .pc-meta { font-size: 0.8rem; color: var(--text-dim); }
+.pond-card .pc-arrow { color: var(--teal); font-size: 1.2rem; }
+@keyframes floatIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0);    }
+}
+
+/* -------------------------------------------------------------------------
+   Badges (RECORDED / OBSERVED / ESTIMATED)
+   ------------------------------------------------------------------------- */
+.badge {
+  display: inline-block;
+  font-size: 0.65rem;
+  font-weight: 800;
+  letter-spacing: 0.6px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  vertical-align: middle;
+}
+.badge-real { background: rgba(53, 224, 192, 0.18); color: var(--aqua);  border: 1px solid rgba(53,224,192,0.5); }
+.badge-est  { background: rgba(255, 209, 102, 0.16); color: var(--gold); border: 1px solid rgba(255,209,102,0.5); }
+
+/* -------------------------------------------------------------------------
+   Pond detail view
+   ------------------------------------------------------------------------- */
+.back-btn {
+  background: none;
+  border: none;
+  color: var(--teal);
+  cursor: pointer;
+  font-size: 0.9rem;
+  padding: 4px 0;
+  margin-bottom: 6px;
+}
+.back-btn:hover { text-decoration: underline; }
+
+.detail-title { margin: 4px 0 2px; font-size: 1.3rem; }
+.detail-sub   { margin: 0 0 14px; color: var(--text-dim); font-size: 0.85rem; }
+
+/* Quick-stat tiles */
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.stat {
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(3, 22, 37, 0.6);
+  border: 1px solid var(--glass-brd);
+}
+.stat .stat-label { font-size: 0.72rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; }
+.stat .stat-value { font-size: 1.15rem; font-weight: 700; margin-top: 2px; }
+
+/* Section headings inside detail */
+.detail-section { margin: 18px 0 10px; }
+.detail-section h3 {
+  margin: 0 0 8px;
+  font-size: 1rem;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Age timeline bar */
+.age-timeline {
+  position: relative;
+  height: 10px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #0a3550, #0b6b6b);
+  margin: 10px 0 6px;
+  overflow: hidden;
+}
+.age-timeline .fill {
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  background: linear-gradient(90deg, var(--teal), var(--gold));
+  border-radius: 999px;
+  animation: growBar 0.9s ease both;
+}
+@keyframes growBar { from { width: 0; } }
+.age-scale { display: flex; justify-content: space-between; font-size: 0.7rem; color: var(--text-dim); }
+.age-note  { font-size: 0.82rem; color: var(--text-dim); margin: 8px 0 0; }
+
+/* Fish cards */
+.fish-reason {
+  font-size: 0.82rem;
+  color: var(--text-dim);
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  border-left: 3px solid var(--teal);
+  background: rgba(3, 22, 37, 0.5);
+  border-radius: 0 8px 8px 0;
+}
+.fish-grid { display: flex; flex-direction: column; gap: 8px; }
+.fish-card {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(3, 22, 37, 0.6);
+  border: 1px solid var(--glass-brd);
+  animation: floatIn 0.4s ease both;
+  transition: transform 0.14s, border-color 0.2s;
+}
+.fish-card:hover { transform: translateX(3px); border-color: var(--aqua); }
+.fish-emoji { font-size: 26px; animation: swim 5s ease-in-out infinite; }
+@keyframes swim {
+  0%, 100% { transform: translateX(0) rotate(0); }
+  50%      { transform: translateX(4px) rotate(4deg); }
+}
+.fish-info { flex: 1; }
+.fish-name { font-weight: 700; }
+.fish-count { font-size: 0.75rem; color: var(--aqua); }
+.fish-fact { font-size: 0.8rem; color: var(--text-dim); margin-top: 3px; }
+
+.detail-links { margin-top: 16px; }
+.detail-links a {
+  color: var(--teal);
+  font-size: 0.85rem;
+  text-decoration: none;
+}
+.detail-links a:hover { text-decoration: underline; }
+
+/* Empty / loading messages */
+.empty-msg {
+  text-align: center;
+  color: var(--text-dim);
+  padding: 30px 10px;
+  font-size: 0.9rem;
+}
+.empty-msg .big { font-size: 40px; display: block; margin-bottom: 10px; opacity: 0.8; }
+
+/* -------------------------------------------------------------------------
+   Footer
+   ------------------------------------------------------------------------- */
+.app-footer {
+  max-width: 1200px;
+  margin: 6px auto 26px;
+  padding: 0 18px;
+  color: var(--text-dim);
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
+/* -------------------------------------------------------------------------
+   Custom map marker (a glowing water pulse)
+   ------------------------------------------------------------------------- */
+.pond-marker {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 40% 40%, #bafcff, var(--teal));
+  box-shadow: 0 0 0 rgba(11, 211, 211, 0.6);
+  animation: pulse 2s infinite;
+}
+@keyframes pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(11, 211, 211, 0.55); }
+  70%  { box-shadow: 0 0 0 18px rgba(11, 211, 211, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(11, 211, 211, 0); }
+}
+.pond-marker.active {
+  background: radial-gradient(circle at 40% 40%, #fff2c8, var(--gold));
+}
+
+/* Make Leaflet popups match the dark theme */
+.leaflet-popup-content-wrapper {
+  background: var(--deep-2);
+  color: var(--text);
+  border-radius: 12px;
+}
+.leaflet-popup-tip { background: var(--deep-2); }
+
+/* -------------------------------------------------------------------------
+   Responsive: stack the map and panel on narrow screens / phones
+   ------------------------------------------------------------------------- */
+@media (max-width: 860px) {
+  .layout { grid-template-columns: 1fr; }
+  .map-wrap { min-height: 380px; }
+  #map { min-height: 368px; }
+  .side { max-height: none; }
+  .logo-text h1 { font-size: 1.6rem; }
+}

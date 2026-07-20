@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PondScope — Find Ponds & Fish Near You</title>
+
+  <!-- Leaflet map library, loaded straight from the internet (no install needed) -->
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+    crossorigin=""
+  />
+
+  <!-- Our own styles -->
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <!-- Animated underwater background layers (pure decoration) -->
+  <div class="bg-water" aria-hidden="true"></div>
+  <div class="bg-caustics" aria-hidden="true"></div>
+  <div class="bg-bubbles" aria-hidden="true">
+    <span></span><span></span><span></span><span></span><span></span>
+    <span></span><span></span><span></span><span></span><span></span>
+  </div>
+
+  <!-- ===================== HEADER ===================== -->
+  <header class="app-header">
+    <div class="logo">
+      <span class="logo-mark">🎣</span>
+      <div class="logo-text">
+        <h1>PondScope</h1>
+        <p>Find ponds &amp; the fish that live in them</p>
+      </div>
+    </div>
+  </header>
+
+  <!-- ===================== SEARCH BAR ===================== -->
+  <section class="search-panel glass">
+    <div class="search-row">
+      <label class="field">
+        <span class="field-label">Coordinates or place name</span>
+        <input
+          id="searchInput"
+          type="text"
+          placeholder="e.g. 40.0, -83.0  or  Columbus, Ohio"
+          autocomplete="off"
+        />
+      </label>
+
+      <button id="locateBtn" class="btn btn-ghost" title="Use my current location">
+        📍 <span>My location</span>
+      </button>
+
+      <button id="searchBtn" class="btn btn-primary">
+        🔍 <span>Scan for ponds</span>
+      </button>
+    </div>
+
+    <div class="search-row search-row--radius">
+      <label class="field field--radius">
+        <span class="field-label">
+          Search radius: <strong id="radiusLabel">3.0 km</strong>
+        </span>
+        <input id="radiusSlider" type="range" min="500" max="10000" step="500" value="3000" />
+      </label>
+      <p class="hint">Tip: you can also just <strong>click anywhere on the map</strong> to scan there.</p>
+    </div>
+  </section>
+
+  <!-- ===================== MAIN LAYOUT ===================== -->
+  <main class="layout">
+    <!-- The interactive map -->
+    <div class="map-wrap glass">
+      <div id="map"></div>
+      <!-- Radar "scanning" overlay, shown only while searching -->
+      <div id="scanOverlay" class="scan-overlay" hidden>
+        <div class="radar"></div>
+        <p class="scan-text">Scanning the water…</p>
+      </div>
+    </div>
+
+    <!-- Right-hand column: either the list of ponds or one pond's details -->
+    <aside class="side glass">
+      <!-- Status / message strip -->
+      <div id="statusBar" class="status-bar">
+        Enter a location above (or click the map) to begin.
+      </div>
+
+      <!-- List of found ponds -->
+      <div id="pondList" class="pond-list"></div>
+
+      <!-- Detail view for a single pond (hidden until one is picked) -->
+      <div id="pondDetail" class="pond-detail" hidden></div>
+    </aside>
+  </main>
+
+  <footer class="app-footer">
+    <p>
+      Data from OpenStreetMap &amp; GBIF. Fish and age marked
+      <span class="badge badge-est">ESTIMATED</span> are smart guesses, not records.
+      Always follow local fishing rules &amp; licenses.
+    </p>
+  </footer>
+
+  <!-- Leaflet library -->
+  <script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+    crossorigin=""
+  ></script>
+
+  <!-- Our fish fallback data, then our app logic -->
+  <script src="data/us-fish.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

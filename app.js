@@ -7,7 +7,7 @@
    1. The user gives us a location (typed coords, a place name, the map click,
       or their GPS).
    2. We ask OpenStreetMap ("Overpass") for water bodies near that spot.
-   3. We show them as glowing markers + a list.
+   3. We show them as glowing markers + a list, plus a circle for the radius.
    4. When one is clicked, we ask GBIF for real fish sightings nearby, estimate
       the pond's age & size, and show a detail panel.
 
@@ -32,10 +32,23 @@ const els = {
 // Remember the ponds we found and their markers so we can highlight/select them.
 let state = {
   map: null,
-  markers: [],      // { pond, marker }
+  markers: [],       // { pond, marker }
   ponds: [],
   centerMarker: null,
+  radiusCircle: null,
+  lastCenter: null,  // {lat, lon} of the most recent search — used by the slider
+  searchToken: 0,    // increments each search so old/slow responses are ignored
 };
+
+// Free public Overpass (OpenStreetMap data) servers. We try them in order; if
+// one is busy or down we automatically fall back to the next. This is the main
+// reason the app is far more reliable than before.
+const OVERPASS_ENDPOINTS = [
+  "https://overpass-api.de/api/interpreter",
+  "https://overpass.kumi.systems/api/interpreter",
+  "https://overpass.private.coffee/api/interpreter",
+  "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
+];
 
 /* =========================================================================
    1. SET UP THE MAP
@@ -59,7 +72,7 @@ function initMap() {
 }
 
 /* =========================================================================
-   2. STATUS + SCAN HELPERS
+   2. STATUS + SCAN + RADIUS-CIRCLE HELPERS
    ========================================================================= */
 function setStatus(msg, kind = "") {
   els.status.className = "status-bar" + (kind ? " " + kind : "");
@@ -69,8 +82,62 @@ function showScan(on) {
   els.scan.hidden = !on;
 }
 
+// Draw (or move/resize) the translucent circle that shows the search radius.
+function updateRadiusCircle(center, radiusM) {
+  if (!state.map || !center) return;
+  if (state.radiusCircle) {
+    state.radiusCircle.setLatLng([center.lat, center.lon]);
+    state.radiusCircle.setRadius(radiusM);
+  } else {
+    state.radiusCircle = L.circle([center.lat, center.lon], {
+      radius: radiusM,
+      color: "#0bd3d3",
+      weight: 2,
+      opacity: 0.9,
+      fillColor: "#0bd3d3",
+      fillOpacity: 0.08,
+      dashArray: "6 8",
+    }).addTo(state.map);
+  }
+}
+
 /* =========================================================================
-   3. TURN USER INPUT INTO COORDINATES
+   3. NETWORK HELPERS (timeouts + Overpass failover)
+   ========================================================================= */
+
+// fetch() with a hard timeout so a slow server can't make the app hang forever.
+function fetchWithTimeout(url, opts = {}, ms = 20000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms);
+  return fetch(url, { ...opts, signal: controller.signal }).finally(() =>
+    clearTimeout(timer)
+  );
+}
+
+// Send an Overpass query, trying each server until one works.
+async function overpassQuery(query) {
+  let lastErr = null;
+  for (const endpoint of OVERPASS_ENDPOINTS) {
+    try {
+      const res = await fetchWithTimeout(
+        endpoint,
+        { method: "POST", body: "data=" + encodeURIComponent(query) },
+        25000
+      );
+      if (!res.ok) {
+        lastErr = new Error(`server busy (${res.status})`);
+        continue; // try the next server
+      }
+      return await res.json();
+    } catch (err) {
+      lastErr = err; // timeout or network error — try the next server
+    }
+  }
+  throw lastErr || new Error("All map servers are unavailable");
+}
+
+/* =========================================================================
+   4. TURN USER INPUT INTO COORDINATES
    Accepts either "lat, lon" numbers or a place name (looked up via Nominatim).
    ========================================================================= */
 async function resolveInput(text) {
@@ -85,32 +152,40 @@ async function resolveInput(text) {
     if (lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180) {
       return { lat, lon, label: `${lat.toFixed(4)}, ${lon.toFixed(4)}` };
     }
+    return { error: "Those coordinates are out of range. Latitude must be -90 to 90 and longitude -180 to 180." };
   }
 
-  // Otherwise treat it as a place name and geocode it.
-  setStatus(`Looking up “${trimmed}”…`);
-  const url =
-    "https://nominatim.openstreetmap.org/search?format=json&limit=1&q=" +
-    encodeURIComponent(trimmed);
-  const res = await fetch(url, { headers: { "Accept": "application/json" } });
-  const data = await res.json();
-  if (data && data.length) {
-    return {
-      lat: parseFloat(data[0].lat),
-      lon: parseFloat(data[0].lon),
-      label: data[0].display_name,
-    };
+  // Otherwise treat it as a place name and geocode it (with a timeout).
+  setStatus(`Looking up “${escapeHtml(trimmed)}”…`);
+  try {
+    const url =
+      "https://nominatim.openstreetmap.org/search?format=json&limit=1&q=" +
+      encodeURIComponent(trimmed);
+    const res = await fetchWithTimeout(url, { headers: { Accept: "application/json" } }, 15000);
+    if (!res.ok) return { error: "The place-name lookup service is busy. Try again, or type coordinates like 40.0, -83.0." };
+    const data = await res.json();
+    if (data && data.length) {
+      return {
+        lat: parseFloat(data[0].lat),
+        lon: parseFloat(data[0].lon),
+        label: data[0].display_name,
+      };
+    }
+    return { error: `Couldn't find a place called “${escapeHtml(trimmed)}”. Check the spelling, add a state/country, or type coordinates.` };
+  } catch (err) {
+    return { error: "Couldn't reach the place-name lookup service. Check your internet, or type coordinates like 40.0, -83.0." };
   }
-  return null;
 }
 
 /* =========================================================================
-   4. FIND PONDS via the Overpass (OpenStreetMap) API
+   5. FIND PONDS via the Overpass (OpenStreetMap) API
    Returns an array of pond objects.
    ========================================================================= */
 async function findPonds(lat, lon, radiusMeters) {
   // Overpass Query Language. We ask for water bodies within `radiusMeters`
   // of the point. "around:R,lat,lon" is a circle filter.
+  // NOTE: we use "out tags geom;" — this returns each shape's TAGS and full
+  // GEOMETRY (so we can measure area). We compute the center point ourselves.
   const R = Math.round(radiusMeters);
   const query = `
     [out:json][timeout:25];
@@ -121,25 +196,36 @@ async function findPonds(lat, lon, radiusMeters) {
       relation["landuse"="reservoir"](around:${R},${lat},${lon});
       way["water"="pond"](around:${R},${lat},${lon});
     );
-    out tags center geom;
+    out tags geom;
   `;
 
-  const res = await fetch("https://overpass-api.de/api/interpreter", {
-    method: "POST",
-    body: "data=" + encodeURIComponent(query),
-  });
-  if (!res.ok) throw new Error("Overpass request failed (" + res.status + ")");
-  const data = await res.json();
+  const data = await overpassQuery(query);
 
   const ponds = [];
   for (const el of data.elements || []) {
     const tags = el.tags || {};
-    // Where is it? Prefer the geometry-derived center Overpass gives us.
-    const center = el.center || (el.lat != null ? { lat: el.lat, lon: el.lon } : null);
-    if (!center) continue;
 
-    // Compute surface area & perimeter from the polygon outline if we have one.
-    const { areaM2, perimeterM } = measurePolygon(el.geometry);
+    // Work out a center point + size from whatever geometry we got.
+    let center = null;
+    let areaM2 = 0;
+    let perimeterM = 0;
+
+    if (Array.isArray(el.geometry) && el.geometry.length >= 3) {
+      // A "way" (single closed shape): geometry is a list of {lat, lon} points.
+      const m = measurePolygon(el.geometry);
+      areaM2 = m.areaM2;
+      perimeterM = m.perimeterM;
+      center = centroidOf(el.geometry);
+    }
+    if (!center && el.bounds) {
+      // A "relation" (multi-part shape) gives us a bounding box — use its middle.
+      center = {
+        lat: (el.bounds.minlat + el.bounds.maxlat) / 2,
+        lon: (el.bounds.minlon + el.bounds.maxlon) / 2,
+      };
+    }
+    if (!center && el.center) center = el.center; // last-ditch fallback
+    if (!center) continue; // nothing usable — skip it
 
     // Figure out a friendly type label.
     const type =
@@ -167,23 +253,34 @@ async function findPonds(lat, lon, radiusMeters) {
 }
 
 /* =========================================================================
-   5. GEOMETRY MATH
+   6. GEOMETRY MATH
    ========================================================================= */
 
 // Distance between two lat/lon points in meters (Haversine formula).
 function haversine(lat1, lon1, lat2, lon2) {
   const toRad = (d) => (d * Math.PI) / 180;
-  const Rkm = 6371000; // Earth radius in meters
+  const Rm = 6371000; // Earth radius in meters
   const dLat = toRad(lat2 - lat1);
   const dLon = toRad(lon2 - lon1);
   const a =
     Math.sin(dLat / 2) ** 2 +
     Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
-  return Rkm * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return Rm * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-// Given Overpass geometry (a list of {lat, lon} points forming the shoreline),
-// estimate surface area (m²) using the shoelace formula and perimeter length.
+// Average position of a list of {lat, lon} points (a simple center point).
+function centroidOf(points) {
+  let latSum = 0;
+  let lonSum = 0;
+  for (const p of points) {
+    latSum += p.lat;
+    lonSum += p.lon;
+  }
+  return { lat: latSum / points.length, lon: lonSum / points.length };
+}
+
+// Given a list of {lat, lon} shoreline points, estimate surface area (m²) using
+// the shoelace formula, plus the perimeter length.
 function measurePolygon(geometry) {
   if (!geometry || geometry.length < 3) return { areaM2: 0, perimeterM: 0 };
 
@@ -207,19 +304,17 @@ function measurePolygon(geometry) {
 }
 
 /* =========================================================================
-   6. ESTIMATE AGE
+   7. ESTIMATE AGE
    Uses a real OSM `start_date` tag when present (RECORDED); otherwise makes a
    clearly-labelled ESTIMATE from the water body's type.
-   Returns { text, badge, note, minYears, maxYears, pointYears }.
    ========================================================================= */
 function estimateAge(pond) {
   const currentYear = new Date().getFullYear();
   const startDate = pond.tags.start_date || pond.tags["construction:start_date"];
 
   if (startDate) {
-    // OSM sometimes stores just a year, sometimes a full date.
     const yr = parseInt(String(startDate).slice(0, 4), 10);
-    if (!isNaN(yr)) {
+    if (!isNaN(yr) && yr > 0 && yr <= currentYear) {
       const age = currentYear - yr;
       return {
         badge: "real",
@@ -232,7 +327,6 @@ function estimateAge(pond) {
 
   const type = (pond.type || "").toLowerCase();
 
-  // Man-made reservoirs: mostly built between ~1930 and ~2000 in the US.
   if (type.includes("reservoir")) {
     return {
       badge: "est",
@@ -241,8 +335,6 @@ function estimateAge(pond) {
       minYears: 25, maxYears: 90, pointYears: 55,
     };
   }
-
-  // Named lakes tend to be older / more established (some natural, some old dams).
   if (type.includes("lake")) {
     return {
       badge: "est",
@@ -251,8 +343,6 @@ function estimateAge(pond) {
       minYears: 50, maxYears: 150, pointYears: 90,
     };
   }
-
-  // Default: small ponds — usually dug in the last several decades.
   return {
     badge: "est",
     text: "~10–60 years",
@@ -262,7 +352,7 @@ function estimateAge(pond) {
 }
 
 /* =========================================================================
-   7. GET FISH via the GBIF API
+   8. GET FISH via the GBIF API
    Returns { list, badge, reason } where list items are {name, emoji, count, fact}.
    ========================================================================= */
 async function getFish(pond) {
@@ -278,7 +368,11 @@ async function getFish(pond) {
   });
 
   try {
-    const res = await fetch("https://api.gbif.org/v1/occurrence/search?" + params);
+    const res = await fetchWithTimeout(
+      "https://api.gbif.org/v1/occurrence/search?" + params,
+      {},
+      15000
+    );
     if (res.ok) {
       const data = await res.json();
       const counts = new Map();
@@ -288,7 +382,6 @@ async function getFish(pond) {
         counts.set(name, (counts.get(name) || 0) + 1);
       }
       if (counts.size > 0) {
-        // Turn the tally into sorted, display-ready fish cards.
         const list = [...counts.entries()]
           .sort((a, b) => b[1] - a[1])
           .slice(0, 12)
@@ -306,7 +399,6 @@ async function getFish(pond) {
       }
     }
   } catch (err) {
-    // Network hiccup — fall through to the estimate below.
     console.warn("GBIF lookup failed, using estimate:", err);
   }
 
@@ -320,7 +412,7 @@ async function getFish(pond) {
 }
 
 /* =========================================================================
-   8. DRAW THE PONDS ON THE MAP + IN THE LIST
+   9. DRAW THE PONDS ON THE MAP + IN THE LIST
    ========================================================================= */
 function renderPonds(ponds, center) {
   // Clear old markers.
@@ -350,8 +442,10 @@ function renderPonds(ponds, center) {
     bounds.push([pond.lat, pond.lon]);
   });
 
-  // Fit the map to show everything we found.
-  if (ponds.length) {
+  // Fit the map to show the search circle (and everything we found).
+  if (state.radiusCircle) {
+    state.map.fitBounds(state.radiusCircle.getBounds(), { padding: [30, 30], maxZoom: 15 });
+  } else if (ponds.length) {
     state.map.fitBounds(bounds, { padding: [40, 40], maxZoom: 15 });
   } else {
     state.map.setView([center.lat, center.lon], 14);
@@ -367,7 +461,7 @@ function renderList(ponds) {
 
   if (!ponds.length) {
     els.list.innerHTML =
-      '<div class="empty-msg"><span class="big">🌵</span>No ponds or lakes found here. Try a bigger search radius, or a different spot.</div>';
+      '<div class="empty-msg"><span class="big">🌵</span>No ponds or lakes found in this circle. Try a bigger search radius, or a different spot.</div>';
     return;
   }
 
@@ -393,7 +487,7 @@ function renderList(ponds) {
 }
 
 /* =========================================================================
-   9. SHOW ONE POND IN DETAIL
+   10. SHOW ONE POND IN DETAIL
    ========================================================================= */
 async function selectPond(pond) {
   // Highlight the matching marker.
@@ -436,7 +530,6 @@ function detailHtml(pond, age, fish, loadingFish) {
       ? '<span class="badge badge-real">OBSERVED</span>'
       : '<span class="badge badge-est">ESTIMATED</span>';
 
-  // Age timeline: how far along a 0–200 year scale our estimate sits.
   const scaleMax = 200;
   const fillPct = Math.min(100, (age.pointYears / scaleMax) * 100);
 
@@ -532,7 +625,7 @@ function estimateDepthNote(pond) {
 }
 
 /* =========================================================================
-   10. FORMATTING HELPERS
+   11. FORMATTING HELPERS
    ========================================================================= */
 function prettyType(type) {
   const map = {
@@ -543,11 +636,12 @@ function prettyType(type) {
   return map[(type || "").toLowerCase()] || "Water body";
 }
 function formatDistance(m) {
-  if (m == null) return "—";
+  if (m == null || isNaN(m)) return "—";
   if (m < 1000) return Math.round(m) + " m";
   return (m / 1000).toFixed(m < 10000 ? 2 : 1) + " km";
 }
 function formatArea(m2) {
+  if (!m2 || isNaN(m2)) return "Unknown";
   const acres = m2 / 4046.86;
   const hectares = m2 / 10000;
   if (m2 < 10000) return Math.round(m2).toLocaleString() + " m² (" + acres.toFixed(2) + " acres)";
@@ -560,35 +654,52 @@ function escapeHtml(str) {
 }
 
 /* =========================================================================
-   11. THE MAIN SEARCH FLOW
+   12. THE MAIN SEARCH FLOW
    ========================================================================= */
 async function runSearch(lat, lon, label) {
   const radius = parseInt(els.radius.value, 10);
+  const token = ++state.searchToken; // so a slow old search can't overwrite a new one
+
+  // Remember this center and draw the radius circle immediately (feels instant).
+  state.lastCenter = { lat, lon };
+  updateRadiusCircle(state.lastCenter, radius);
+  state.map.setView([lat, lon], zoomForRadius(radius), { animate: true });
+
   showScan(true);
-  setStatus(`Scanning within ${formatDistance(radius)} of ${label || lat.toFixed(4) + ", " + lon.toFixed(4)}…`);
+  setStatus(`Scanning within ${formatDistance(radius)} of ${escapeHtml(label || lat.toFixed(4) + ", " + lon.toFixed(4))}…`);
   els.detail.hidden = true;
   els.list.hidden = false;
   els.list.innerHTML = "";
 
   try {
     const ponds = await findPonds(lat, lon, radius);
+    if (token !== state.searchToken) return; // a newer search started; ignore this result
     renderPonds(ponds, { lat, lon });
     if (ponds.length) {
       setStatus(`Found <strong>${ponds.length}</strong> water bod${ponds.length === 1 ? "y" : "ies"} nearby. Tap one for fish, age &amp; more.`, "success");
     } else {
-      setStatus("No ponds or lakes found here. Try a wider radius or a new spot.", "");
+      setStatus("No ponds or lakes found in this circle. Try a wider radius (drag the slider) or a new spot.", "");
     }
   } catch (err) {
+    if (token !== state.searchToken) return;
     console.error(err);
     showDemoFallback(lat, lon, err);
   } finally {
-    showScan(false);
+    if (token === state.searchToken) showScan(false);
   }
 }
 
-// If the live map data can't be reached (no internet, API down, or running
-// from a restricted browser), we still show a friendly DEMO pond so the app
-// never looks broken.
+// Pick a sensible starting zoom so the whole search circle is visible.
+function zoomForRadius(radiusM) {
+  if (radiusM <= 800) return 15;
+  if (radiusM <= 1500) return 14;
+  if (radiusM <= 3500) return 13;
+  if (radiusM <= 6000) return 12;
+  return 11;
+}
+
+// If the live map data can't be reached (no internet, all servers busy, etc.),
+// we still show a friendly DEMO pond so the app never looks broken.
 function showDemoFallback(lat, lon, err) {
   const demo = [{
     id: "demo/1",
@@ -603,26 +714,32 @@ function showDemoFallback(lat, lon, err) {
   }];
   renderPonds(demo, { lat, lon });
   setStatus(
-    "⚠️ Couldn't reach the live pond database right now, so here's a <strong>demo pond</strong> to explore. " +
-    "This usually means no internet connection. (" + escapeHtml(err.message || "network error") + ")",
+    "⚠️ The live map servers are busy or unreachable right now, so here's a <strong>demo pond</strong> to explore. " +
+    "Please try again in a moment. (" + escapeHtml(err.message || "network error") + ")",
     "error"
   );
 }
 
 /* =========================================================================
-   12. HOOK UP THE BUTTONS
+   13. HOOK UP THE BUTTONS
    ========================================================================= */
 function wireControls() {
-  // Live radius label.
+  // Live radius label + live-growing circle on the map.
   els.radius.addEventListener("input", () => {
-    els.radiusLbl.textContent = (els.radius.value / 1000).toFixed(1) + " km";
+    const r = parseInt(els.radius.value, 10);
+    els.radiusLbl.textContent = (r / 1000).toFixed(1) + " km";
+    if (state.lastCenter) updateRadiusCircle(state.lastCenter, r);
   });
 
   // Search button + Enter key.
   const doTextSearch = async () => {
     const loc = await resolveInput(els.input.value);
     if (!loc) {
-      setStatus("Hmm, I couldn't understand that. Try coordinates like <strong>40.0, -83.0</strong> or a place like <strong>Austin, Texas</strong>.", "error");
+      setStatus("Type coordinates like <strong>40.0, -83.0</strong> or a place like <strong>Austin, Texas</strong>.", "error");
+      return;
+    }
+    if (loc.error) {
+      setStatus(loc.error, "error");
       return;
     }
     runSearch(loc.lat, loc.lon, loc.label);
@@ -648,7 +765,7 @@ function wireControls() {
 }
 
 /* =========================================================================
-   13. START EVERYTHING once the page has loaded
+   14. START EVERYTHING once the page has loaded
    ========================================================================= */
 window.addEventListener("DOMContentLoaded", () => {
   initMap();

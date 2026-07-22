@@ -241,19 +241,50 @@ input[type="range"] {
   z-index: 1;
 }
 
-/* Radar scanning overlay */
+/* Map overlay (idle / busy / hidden) */
 .scan-overlay {
   position: absolute;
   inset: 6px;
   border-radius: 12px;
-  background: rgba(2, 12, 22, 0.55);
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 16px;
   z-index: 500;
+  text-align: center;
+  padding: 20px;
+  transition: opacity 0.35s ease, visibility 0.35s ease;
+}
+
+/* IDLE: gentle prompt on first load. Subtle background, and clicks pass
+   through to the map so users can tap the map to search. */
+.scan-overlay.state-idle {
+  background: linear-gradient(180deg, rgba(2, 12, 22, 0.35), rgba(2, 12, 22, 0.55));
+  backdrop-filter: blur(1px);
+  pointer-events: none;
+  opacity: 1;
+  visibility: visible;
+}
+.scan-overlay.state-idle .scan-busy { display: none; }
+.scan-idle { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.scan-idle-icon { font-size: 46px; filter: drop-shadow(0 0 14px rgba(11, 211, 211, 0.6)); animation: sway 4s ease-in-out infinite; }
+
+/* BUSY: darker, blocks interaction, shows the radar. */
+.scan-overlay.state-busy {
+  background: rgba(2, 12, 22, 0.6);
   backdrop-filter: blur(2px);
+  pointer-events: auto;
+  opacity: 1;
+  visibility: visible;
+}
+.scan-overlay.state-busy .scan-idle { display: none; }
+
+/* HIDDEN: fade out and let the map through entirely. */
+.scan-overlay.state-hidden {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
 }
 .radar {
   position: relative;
@@ -281,7 +312,8 @@ input[type="range"] {
   animation: sweep 1.4s linear infinite;
 }
 @keyframes sweep { to { transform: rotate(360deg); } }
-.scan-text { color: var(--aqua); font-weight: 600; letter-spacing: 0.5px; }
+.scan-busy { display: flex; flex-direction: column; align-items: center; gap: 16px; }
+.scan-text { color: var(--aqua); font-weight: 600; letter-spacing: 0.5px; max-width: 280px; }
 
 /* Side panel */
 .side {
@@ -568,8 +600,18 @@ input[type="range"] {
    ------------------------------------------------------------------------- */
 @media (max-width: 860px) {
   .layout { grid-template-columns: 1fr; }
-  .map-wrap { min-height: 380px; }
-  #map { min-height: 368px; }
+  /* Give the map a generous, screen-relative height on phones so it isn't
+     cramped when stacked above the sidebar. ~62% of the viewport height,
+     with a firm floor so it's never tiny on short screens. */
+  .map-wrap { min-height: max(62vh, 420px); }
+  #map { min-height: max(calc(62vh - 12px), 408px); }
   .side { max-height: none; }
   .logo-text h1 { font-size: 1.6rem; }
+}
+
+/* On very short phones (e.g. landscape), cap it so the map doesn't eat the
+   whole screen and hide the controls. */
+@media (max-width: 860px) and (max-height: 640px) {
+  .map-wrap { min-height: 340px; }
+  #map { min-height: 328px; }
 }

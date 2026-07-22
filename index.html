@@ -74,10 +74,19 @@
     <!-- The interactive map -->
     <div class="map-wrap glass">
       <div id="map"></div>
-      <!-- Radar "scanning" overlay, shown only while searching -->
-      <div id="scanOverlay" class="scan-overlay" hidden>
-        <div class="radar"></div>
-        <p class="scan-text">Scanning the water…</p>
+      <!-- Map overlay. Has three states, toggled by a CSS class from app.js:
+           state-idle    → gentle "enter a location" hint (initial page load)
+           state-busy    → animated radar + live status while searching
+           state-hidden  → faded out, map fully interactive -->
+      <div id="scanOverlay" class="scan-overlay state-idle">
+        <div class="scan-idle">
+          <div class="scan-idle-icon">🗺️</div>
+          <p class="scan-text">Enter a location above, or tap the map, to begin</p>
+        </div>
+        <div class="scan-busy">
+          <div class="radar"></div>
+          <p class="scan-text" id="scanText">Scanning the water…</p>
+        </div>
       </div>
     </div>
 

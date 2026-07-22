@@ -41,14 +41,20 @@ let state = {
 };
 
 // Free public Overpass (OpenStreetMap data) servers. We try them in order; if
-// one is busy or down we automatically fall back to the next. This is the main
-// reason the app is far more reliable than before.
+// one is busy or down we automatically fall back to the next, telling the user
+// which attempt we're on. Ordered fastest / most reliable first: Kumi Systems
+// is consistently quick, the official server is reliable but often overloaded,
+// then two community mirrors as further backups.
 const OVERPASS_ENDPOINTS = [
-  "https://overpass-api.de/api/interpreter",
   "https://overpass.kumi.systems/api/interpreter",
+  "https://overpass-api.de/api/interpreter",
   "https://overpass.private.coffee/api/interpreter",
   "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
 ];
+
+// How long to wait on ONE mirror before giving up and trying the next. Kept
+// short so the total wait stays reasonable even if the first mirror is down.
+const OVERPASS_TIMEOUT_MS = 11000;
 
 /* =========================================================================
    1. SET UP THE MAP
@@ -81,8 +87,16 @@ function setStatus(msg, kind = "") {
   els.status.className = "status-bar" + (kind ? " " + kind : "");
   els.status.innerHTML = msg;
 }
-function showScan(on) {
-  els.scan.hidden = !on;
+
+// Control the map overlay. `stateName` is "idle" | "busy" | "hidden".
+// Optional `text` updates the message shown while busy.
+function setOverlay(stateName, text) {
+  els.scan.classList.remove("state-idle", "state-busy", "state-hidden");
+  els.scan.classList.add("state-" + stateName);
+  if (text) {
+    const t = $("scanText");
+    if (t) t.textContent = text;
+  }
 }
 
 // Draw (or move/resize) the translucent circle that shows the search radius.
@@ -117,15 +131,18 @@ function fetchWithTimeout(url, opts = {}, ms = 20000) {
   );
 }
 
-// Send an Overpass query, trying each server until one works.
-async function overpassQuery(query) {
+// Send an Overpass query, trying each server until one works. `onAttempt(n, total)`
+// is called before each try so the UI can show progress ("Trying server 2/4…").
+async function overpassQuery(query, onAttempt) {
   let lastErr = null;
-  for (const endpoint of OVERPASS_ENDPOINTS) {
+  const total = OVERPASS_ENDPOINTS.length;
+  for (let i = 0; i < total; i++) {
+    if (onAttempt) onAttempt(i + 1, total);
     try {
       const res = await fetchWithTimeout(
-        endpoint,
+        OVERPASS_ENDPOINTS[i],
         { method: "POST", body: "data=" + encodeURIComponent(query) },
-        25000
+        OVERPASS_TIMEOUT_MS
       );
       if (!res.ok) {
         lastErr = new Error(`server busy (${res.status})`);
@@ -184,7 +201,7 @@ async function resolveInput(text) {
    5. FIND PONDS via the Overpass (OpenStreetMap) API
    Returns an array of pond objects.
    ========================================================================= */
-async function findPonds(lat, lon, radiusMeters) {
+async function findPonds(lat, lon, radiusMeters, onAttempt) {
   // Overpass Query Language. We ask for water bodies within `radiusMeters`
   // of the point. "around:R,lat,lon" is a circle filter.
   // NOTE: we use "out tags geom;" — this returns each shape's TAGS and full
@@ -202,7 +219,7 @@ async function findPonds(lat, lon, radiusMeters) {
     out tags geom;
   `;
 
-  const data = await overpassQuery(query);
+  const data = await overpassQuery(query, onAttempt);
 
   const ponds = [];
   for (const el of data.elements || []) {
@@ -334,9 +351,22 @@ function computeFishability(pond, fish) {
   }
 
   score = Math.max(1, Math.min(10, Math.round(score)));
-  const labels = ["", "Very slow", "Poor", "Slow", "Below average", "Fair",
-                  "Decent", "Good", "Very good", "Excellent", "Prime spot"];
-  return { score, label: labels[score], reason };
+
+  // A descriptor word for the score...
+  const descriptors = ["", "Very slow", "Poor", "Slow", "Below average", "Fair",
+                       "Decent", "Good", "Very good", "Excellent", "Prime spot"];
+  const descriptor = descriptors[score];
+
+  // ...and a bite-likelihood phrase that MATCHES the score (no more "3/10 —
+  // bites likely" contradictions). Low = unlikely, middle = possible, high = likely.
+  let bites;
+  if (score <= 3) bites = "bites unlikely";
+  else if (score <= 6) bites = "bites possible";
+  else bites = "bites likely";
+
+  // Combined label used in the UI, e.g. "Decent — bites possible".
+  const label = `${descriptor} — ${bites}`;
+  return { score, descriptor, bites, label, reason };
 }
 
 // Given a list of {lat, lon} shoreline points, estimate surface area (m²) using
@@ -665,7 +695,7 @@ function detailHtml(pond, age, fish, loadingFish) {
         <div class="score-num">${fscore.score}<span>/10</span></div>
         <div class="score-side">
           <div class="score-meter">${meterBars}</div>
-          <div class="score-label">${fscore.label} — bites likely</div>
+          <div class="score-label">${fscore.label}</div>
         </div>
       </div>
       <p class="age-note">${escapeHtml(fscore.reason)}</p>
@@ -761,16 +791,25 @@ async function runSearch(lat, lon, label) {
   updateRadiusCircle(state.lastCenter, radius);
   state.map.setView([lat, lon], zoomForRadius(radius), { animate: true });
 
-  showScan(true);
+  setOverlay("busy", "Scanning the water…");
   setStatus(`Scanning within ${formatDistance(radius)} of ${escapeHtml(label || lat.toFixed(4) + ", " + lon.toFixed(4))}…`);
   els.detail.hidden = true;
   els.list.hidden = false;
   els.list.innerHTML = "";
 
+  // Called before each map-server attempt so the overlay shows live progress.
+  const onAttempt = (n, total) => {
+    if (token !== state.searchToken) return;
+    setOverlay("busy", n === 1
+      ? "Scanning the water…"
+      : `First server was slow — trying alternate server (${n}/${total})…`);
+  };
+
   try {
-    const ponds = await findPonds(lat, lon, radius);
+    const ponds = await findPonds(lat, lon, radius, onAttempt);
     if (token !== state.searchToken) return; // a newer search started; ignore this result
-    renderPonds(ponds, { lat, lon });
+    renderPonds(ponds, { lat, lon });   // markers render...
+    setOverlay("hidden");               // ...then fade the overlay out
     if (ponds.length) {
       setStatus(`Found <strong>${ponds.length}</strong> water bod${ponds.length === 1 ? "y" : "ies"} nearby. Tap one for fish, age &amp; more.`, "success");
     } else {
@@ -780,8 +819,7 @@ async function runSearch(lat, lon, label) {
     if (token !== state.searchToken) return;
     console.error(err);
     showDemoFallback(lat, lon, err);
-  } finally {
-    if (token === state.searchToken) showScan(false);
+    setOverlay("hidden"); // hide overlay even on error (demo pond is shown instead)
   }
 }
 
@@ -866,4 +904,5 @@ function wireControls() {
 window.addEventListener("DOMContentLoaded", () => {
   initMap();
   wireControls();
+  setOverlay("idle"); // start in the gentle "enter a location" state, never "scanning"
 });

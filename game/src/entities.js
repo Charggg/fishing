@@ -529,6 +529,11 @@
     this.phase = 'run';
     this.phaseTime = 0.5 + Math.random() * 0.6;
     this.angle = angle;
+    this.angleTarget = angle;
+    this.weave = 0;
+    this.weavePhase = Math.random() * M.TAU;
+    this.swimAngle = angle;
+    this.rise = 0;
   };
 
   /**
@@ -554,7 +559,8 @@
       if (r < 0.42 * fp.runs * (1 - tired * 0.75)) {
         this.phase = 'run';
         this.phaseTime = M.randRange(rng, 0.6, 1.8) * (1 - tired * 0.4);
-        this.angle += M.randRange(rng, -1.1, 1.1);
+        // A target, not the angle itself — see the easing below.
+        this.angleTarget += M.randRange(rng, -1.1, 1.1);
       } else if (r < 0.16 + tired * 0.62) {
         // A fresh fish rarely gives anything back. Tire it out first.
         this.phase = 'give';
@@ -574,6 +580,25 @@
     else if (this.phase === 'hold') pull = power * 0.46;
     else pull = -power * 0.12;
     var pullMag = Math.max(pull, 0);
+
+    /* Where the fish actually is.
+       The angle used to change only on a phase flip, so between phases the
+       fish was frozen in place and then teleported sideways — from the boat it
+       read as a fish that does not move at all. Now the phase change sets a
+       TARGET and the fish sweeps toward it, with a constant weave on top so
+       there is always something happening on the end of the line. A fresh fish
+       on a run throws its head about; a beaten one barely wanders. */
+    this.angle = M.damp(this.angle, this.angleTarget,
+      this.phase === 'run' ? 2.4 : 1.1, dt);
+    var life = 0.30 + 0.70 * this.stamina;
+    var amp = (this.phase === 'run' ? 0.34 : this.phase === 'hold' ? 0.17 : 0.09) * life;
+    this.weave =
+      Math.sin(this.elapsed * (1.5 + fp.shake * 0.8) + this.weavePhase) * amp +
+      Math.sin(this.elapsed * (3.6 + fp.shake * 1.6) + this.weavePhase * 1.7) * amp * 0.34;
+    this.swimAngle = this.angle + this.weave;
+    // Vertical wander, so it works the depth as well as the surface.
+    this.rise = Math.sin(this.elapsed * (0.9 + fp.shake * 0.5) + this.weavePhase * 0.5) *
+      (0.34 + 0.5 * this.stamina) * (this.phase === 'run' ? 1.0 : 0.55);
 
     // Headshakes spike the tension — that is the flutter you feel in the bar.
     this.headshake = Math.sin(this.elapsed * (7 + fp.shake * 5)) * fp.shake * 0.035 *

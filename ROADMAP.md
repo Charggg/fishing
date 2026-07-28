@@ -19,6 +19,8 @@ QA harness clean. It is not yet *massive* or *addictive* — that is the job.
 | Spot balance | `node game/qa/spotbias.js` | Fishes every spot and tallies the species. A tuning instrument, not a gate. |
 | **Everything** | `node game/qa/all.js` | Runs the whole suite and prints a scorecard. `--quick` for a ~3 min pass. Use this before saying done. |
 | Quest chain | `node game/qa/questplay.js` | A bot that reads the chart and plays the commission chain. Proves it is completable. |
+| Frame cost | `node game/qa/bench.js [preset]` | Milliseconds per frame under SwiftShader. **Absolute numbers are meaningless** — no GPU here. A/B ratios are not. |
+| Ablation | `node game/qa/ablate.js [preset]` | Turns one system off at a time and reports what it was costing. Use this before optimising anything. |
 | Viewmodel | `node game/qa/viewmodel.js --probe` | Measures where the rod, hands and forearms land on screen across a whole crank revolution. Exits non-zero. Drop `--probe` to also render the rod with pieces suppressed one at a time. |
 | Crop | `node game/qa/crop.js <png> <x> <y> <w> <h> [zoom]` | Zooms into a screenshot. There is no image library here, so it borrows the browser's canvas. |
 
@@ -51,9 +53,33 @@ QA scripts resolve Playwright through `game/qa/pw.js`, so they run with a plain
 - [ ] The reflection pass draws a fraction of prop instances on medium quality
       (`reflFrac`), which is a fixed prefix of the array, so the same trees are
       always missing. Should be a spatial choice, not an array slice.
-- [ ] No frame-rate adaptive quality. A weak GPU just runs slowly forever.
+- [ ] The water surface is a uniform 240x240 grid (~115k triangles) regardless
+      of how much of it is on screen. A radial or clipmap grid would cut it
+      hard. Worth ~18% of a frame.
+- [ ] Rarity is not gated by level or luck: a mythic can turn up on day one at
+      level 1, which happened to the player on their first session and cheapens
+      the whole ladder. Weight the roll by level.
 
 ### Fixed
+- [x] **2026-07-28** *(user-reported)* **Insanely low frame rate.** Measured
+      rather than guessed, which mattered: my confident first theory (per-pixel
+      analytic sky in the fog) turned out to be 6% of the frame. The real costs
+      were 6,825 prop instances drawn three times a frame with **no frustum
+      culling at all**, a 194k-triangle terrain drawn three times, and a
+      four-octave fbm (four dependent texture fetches) evaluated per fragment
+      across most of the screen. Frame cost is now 1.8x-2.5x lower depending on
+      preset, before counting the device-pixel-ratio cap.
+- [x] **2026-07-28** *(user-reported)* **The oars stroked in opposite
+      directions.** The port oar is built by flipping its frame 180 degrees,
+      which reverses whichever angles turn about the flipped axes. Both oars
+      were fed the same sweep, so one pulled while the other pushed. The lift
+      must *not* be mirrored, which I got wrong on the first attempt and caught
+      by measuring blade positions through a stroke.
+- [x] **2026-07-28** *(user-reported)* **A hooked fish did not move.** Its
+      bearing only changed on a fight phase transition, so between phases it
+      sat perfectly still and then teleported sideways. It now eases toward a
+      target bearing with a constant weave and a vertical wander on top.
+      Harness measures it: a hooked fish now ranges ~21 m during a fight.
 - [x] **2026-07-28** *(user-reported)* The rod viewmodel was mounted upside
       down. `cameraBasis()` negated the up column, so the whole first-person
       rig was inverted — the player read as holding the rod overhead from knee
@@ -291,6 +317,34 @@ viewmodel upside down. I had visually signed off on that rod twice.
 - Harness now fits the sounder before the boat run and asserts the ping buffer
   is capped, marks are finite and in range, and nothing pings without a unit.
 
+### 2026-07-28 — Session 7 (autonomous)
+The player ran the build on a real Windows PC — the first time this game has
+ever run on real hardware — and reported very low frame rates, oars that moved
+independently, and a hooked fish that did not move.
+
+- **Built the instruments first.** `qa/bench.js` (frame cost, with a loud
+  warning that absolute numbers are meaningless on a software rasteriser) and
+  `qa/ablate.js` (turn one system off, measure what it cost). Then used them.
+  This immediately killed my leading theory and pointed at the real costs.
+- **Prop frustum + distance culling.** 6,825 instances were drawn three times
+  a frame regardless of where the camera pointed. -25% frame cost.
+- **Terrain chunking and a half-resolution LOD** for the reflection and
+  refraction passes. Chunk culling barely helped, which was itself the useful
+  result: it proved the terrain is fragment-bound, not vertex-bound, and sent
+  me to the fragment shader.
+- **fbmLo:** two octaves instead of four for terrain tint, caustics and fish.
+  Each octave is a dependent texture fetch. -18% frame cost on its own.
+- **Device-pixel-ratio cap per preset.** A Windows desktop at 125% scaling was
+  quietly rendering 1.6x the pixels for no visible gain.
+- **Adaptive quality.** The renderer now finds its own level and says so, and
+  a manual choice locks it off for the session. This matters more than any
+  single optimisation, because I cannot test on the hardware it runs on.
+- Fixed the oars and the motionless hooked fish; both now have harness
+  invariants because both are silent, visual-only failures.
+- `P` now reports preset, render resolution, dpr, props surviving the cull and
+  terrain chunks — the numbers I would need to diagnose a slow machine from a
+  single screenshot.
+
 ### 2026-07-28 — Session 1
 - Built the game: renderer, world, fish AI, fight sim, audio, UI, saves.
 
@@ -342,3 +396,12 @@ their band is a one-line experiment; run `spotbias.js` before and after.
   the frame. Two runs instead of ten.
 - **The viewmodel is the one thing the player stares at for hours.** It is
   ~2% of the triangles and it was the only thing they commented on.
+- **Never optimise without measuring first.** I was certain the per-pixel
+  Preetham sky in the fog was the frame killer. It was 6%. The actual costs
+  were unculled instancing and a four-octave noise loop — neither of which I
+  would have picked. `ablate.js` exists so the next session does not have to
+  guess either.
+- **A software rasteriser is not useless for performance work.** Absolute
+  timings are meaningless, but it runs the same GLSL and the same draw calls,
+  so A/B ratios on fragment cost and draw counts hold up. Say which of the two
+  you are quoting, every time.

@@ -33,6 +33,7 @@ const SESSIONS = parseInt(process.argv[2] || '3', 10);
     const stats = { casts: 0, bites: 0, landed: 0, snapped: 0, thrown: 0, timeouts: 0, frames: 0 };
     let maxCast = 0, maxParticles = 0, maxRipples = 0, maxFishDrawn = 0, trackDeepest = 0;
 
+    const oarSweep = [], fightTrack = [], fightSpans = [];
     const seenFail = Object.create(null);
     function fail(msg) {
       // Collapse repeats: a stuck frame otherwise emits the same line 2000 times.
@@ -142,6 +143,49 @@ const SESSIONS = parseInt(process.argv[2] || '3', 10);
           if (!g.spots.some(sp => sp.id === id)) fail(tag + ': unknown spot id in save: ' + id);
         }
       }
+
+      /* The oars must stroke as a pair. They are built by flipping one frame
+         180 degrees, which silently reverses whichever angles turn about the
+         flipped axes — the port oar spent a whole release pulling while the
+         starboard one pushed. Mirror-check them every frame. */
+      if (g.boat.aboard) {
+        const bm = g.boat.matrix, inv = DC.M4.create();
+        DC.M4.invert(inv, bm);
+        const tipL = [1.20, 0, 0];
+        const xf = (m, q) => [
+          m[0] * q[0] + m[4] * q[1] + m[8] * q[2] + m[12],
+          m[1] * q[0] + m[5] * q[1] + m[9] * q[2] + m[13],
+          m[2] * q[0] + m[6] * q[1] + m[10] * q[2] + m[14]];
+        const L = xf(inv, xf(g.boat.oarL, tipL));
+        const R = xf(inv, xf(g.boat.oarR, tipL));
+        if (Math.abs(L[0] + R[0]) > 0.15) fail(tag + ': oars not mirrored across the hull');
+        if (Math.abs(L[2] - R[2]) > 0.15) fail(tag + ': oars sweeping out of sync (fore/aft ' +
+          L[2].toFixed(2) + ' vs ' + R[2].toFixed(2) + ')');
+        if (Math.abs(L[1] - R[1]) > 0.15) fail(tag + ': one oar lifting while the other digs in');
+        oarSweep.push(L[2]);
+      }
+
+      /* A hooked fish has to actually move. It used to change direction only
+         on a phase flip, so between phases it sat perfectly still on the end
+         of the line — which is exactly how it read on screen. */
+      if (g.mode === 'fighting' && g.hookedRender) {
+        const h = g.hookedRender;
+        if (!finite(h.x) || !finite(h.y) || !finite(h.z)) fail(tag + ': hooked fish position not finite');
+        fightTrack.push(h.x, h.z);
+      } else if (fightTrack.length >= 240) {
+        let minX = 1e9, maxX = -1e9, minZ = 1e9, maxZ = -1e9;
+        for (let i = 0; i < fightTrack.length; i += 2) {
+          if (fightTrack[i] < minX) minX = fightTrack[i];
+          if (fightTrack[i] > maxX) maxX = fightTrack[i];
+          if (fightTrack[i + 1] < minZ) minZ = fightTrack[i + 1];
+          if (fightTrack[i + 1] > maxZ) maxZ = fightTrack[i + 1];
+        }
+        const span = Math.hypot(maxX - minX, maxZ - minZ);
+        fightSpans.push(span);
+        if (span < 0.75) fail(tag + ': hooked fish barely moved over ' +
+          (fightTrack.length / 2 / 60).toFixed(1) + 's (' + span.toFixed(2) + ' m)');
+        fightTrack.length = 0;
+      } else { fightTrack.length = 0; }
 
       /* Sonar. The ping buffer is unbounded-looking (it just pushes), so the
          cap is worth asserting: this runs every frame for an entire session
@@ -528,7 +572,12 @@ const SESSIONS = parseInt(process.argv[2] || '3', 10);
       fails, stats, maxCast, maxParticles, maxRipples, maxFishDrawn, boatRange, boatDeepest,
       spotCount: (g.spots || []).length,
       spotsLogged: Object.keys(g.state.spots || {}).length,
-      questCount: DC.Quests.LIST.length
+      questCount: DC.Quests.LIST.length,
+      oarTravel: oarSweep.length ? Math.max.apply(null, oarSweep) - Math.min.apply(null, oarSweep) : 0,
+      fightSpanAvg: fightSpans.length
+        ? fightSpans.reduce(function (a, b) { return a + b; }, 0) / fightSpans.length : 0,
+      fightSpanMin: fightSpans.length ? Math.min.apply(null, fightSpans) : 0,
+      fightsTracked: fightSpans.length
     };
   }, SESSIONS);
 
@@ -550,6 +599,9 @@ const SESSIONS = parseInt(process.argv[2] || '3', 10);
   console.log('boat depth    ' + report.boatDeepest.toFixed(1) + ' m deepest water reached');
   console.log('spots         ' + report.spotCount + ' found, ' + report.spotsLogged + ' logged');
   console.log('commissions   ' + report.questCount + ' in the chain, all verified completable');
+  console.log('oar stroke    ' + report.oarTravel.toFixed(2) + ' m fore/aft, both blades in sync');
+  console.log('fish movement ' + report.fightsTracked + ' fights, hooked fish ranged ' +
+    report.fightSpanAvg.toFixed(1) + ' m avg / ' + report.fightSpanMin.toFixed(1) + ' m worst');
   console.log('');
 
   const allFails = fails.concat(errors);

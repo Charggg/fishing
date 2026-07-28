@@ -177,16 +177,63 @@
       }
     }
 
+    /* Indices are emitted chunk by chunk rather than row by row, so the
+       renderer can frustum-cull the terrain instead of drawing all 194k
+       triangles every pass. Each chunk records the index range it occupies
+       and its bounding box; drawElements takes a byte offset, so a visible
+       chunk is one ranged draw out of the shared buffer. */
+    var CH = 8;
     var indices = new Uint32Array((n - 1) * (n - 1) * 6);
+    var chunks = [];
     var ip = 0;
-    for (var jj = 0; jj < n - 1; jj++) {
-      for (var ii = 0; ii < n - 1; ii++) {
-        var a = jj * n + ii, b = a + 1, c = a + n, d2 = c + 1;
-        indices[ip++] = a; indices[ip++] = c; indices[ip++] = b;
-        indices[ip++] = b; indices[ip++] = c; indices[ip++] = d2;
+    for (var cj = 0; cj < CH; cj++) {
+      for (var ci = 0; ci < CH; ci++) {
+        var j0 = Math.floor(cj * (n - 1) / CH), j1 = Math.floor((cj + 1) * (n - 1) / CH);
+        var i0 = Math.floor(ci * (n - 1) / CH), i1 = Math.floor((ci + 1) * (n - 1) / CH);
+        if (j1 <= j0 || i1 <= i0) continue;
+        var start = ip, minY = 1e9, maxY = -1e9;
+        for (var jj = j0; jj < j1; jj++) {
+          for (var ii = i0; ii < i1; ii++) {
+            var a = jj * n + ii, b = a + 1, c = a + n, d2 = c + 1;
+            indices[ip++] = a; indices[ip++] = c; indices[ip++] = b;
+            indices[ip++] = b; indices[ip++] = c; indices[ip++] = d2;
+          }
+        }
+        for (var hj = j0; hj <= j1; hj++) {
+          for (var hi = i0; hi <= i1; hi++) {
+            var hy = verts[(hj * n + hi) * 8 + 1];
+            if (hy < minY) minY = hy;
+            if (hy > maxY) maxY = hy;
+          }
+        }
+        chunks.push({
+          start: start, count: ip - start,
+          minX: axis[i0], maxX: axis[i1], minZ: axis[j0], maxZ: axis[j1],
+          minY: minY, maxY: maxY
+        });
       }
     }
-    return { data: verts, indices: indices, indexCount: ip, gridSize: n };
+    /* A half-resolution index buffer over the SAME vertices, for the
+       reflection and refraction passes. Those two draw the terrain purely to
+       be blurred, mirrored or seen through 3 m of water, and nobody has ever
+       noticed the difference — but they were paying full price for 194k
+       triangles twice a frame. Decimating indices costs no extra vertex
+       memory at all. */
+    var ln = ((n - 1) >> 1);
+    var lodIdx = new Uint32Array(ln * ln * 6);
+    var lp = 0;
+    for (var lj = 0; lj < ln; lj++) {
+      for (var li = 0; li < ln; li++) {
+        var r0 = (lj * 2) * n + li * 2, r1 = r0 + 2;
+        var r2 = (lj * 2 + 2) * n + li * 2, r3 = r2 + 2;
+        lodIdx[lp++] = r0; lodIdx[lp++] = r2; lodIdx[lp++] = r1;
+        lodIdx[lp++] = r1; lodIdx[lp++] = r2; lodIdx[lp++] = r3;
+      }
+    }
+    return {
+      data: verts, indices: indices, indexCount: ip, gridSize: n, chunks: chunks,
+      lodIndices: lodIdx, lodIndexCount: lp
+    };
   };
 
   // ------------------------------------------------------------ the dock

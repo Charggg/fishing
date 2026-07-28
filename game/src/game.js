@@ -957,13 +957,22 @@
     if (!b.aboard) { sweep = 0.9; lift = 0.55; }   // shipped, stowed inboard
     var lockZ = -A.BOAT_LEN / 2 + 0.50 * A.BOAT_LEN;
     var lockX = A.boatBeam(0.50), lockY = A.boatSheer(0.50);
+    /* The port oar is built by spinning its frame 180 degrees, which also
+       flips the axes the sweep and lift turn about. Feeding both oars the
+       same angles therefore drove them in OPPOSITE directions — one pulling
+       while the other pushed, and one blade lifting while the other dug in.
+       Negating the SWEEP on the mirrored side makes the pair stroke together,
+       which is how rowing actually works. The lift is deliberately not
+       mirrored: it turns about Z, whose sign the 180 degree flip does not
+       invert for the blade's height, so negating it too puts one blade in the
+       air while the other digs in. */
     for (var side = 0; side < 2; side++) {
       var sgn = side === 0 ? -1 : 1;
       var out = side === 0 ? b.oarL : b.oarR;
       M4.identity(_mBoat);
       M4.translate(_mBoat, _mBoat, [sgn * lockX, lockY, lockZ]);
       M4.rotateY(_mBoat, _mBoat, side === 0 ? Math.PI : 0);
-      M4.rotateY(_mBoat, _mBoat, sweep);
+      M4.rotateY(_mBoat, _mBoat, sweep * sgn);
       M4.rotateZ(_mBoat, _mBoat, -lift);
       M4.multiply(out, b.matrix, _mBoat);
     }
@@ -1480,12 +1489,13 @@
     // Place the hooked fish on its arc.
     var f = fight.fish;
     this.rodTip(_tip);
-    var ang = fight.angle;
+    var ang = fight.swimAngle !== undefined ? fight.swimAngle : fight.angle;
     var fx = _tip[0] + Math.cos(ang) * fight.line;
     var fz = _tip[2] + Math.sin(ang) * fight.line;
     var surf = Ent.waveHeight(fx, fz, s.waveTime, s.waveScale);
     var bottom = this.world.sample(fx, fz);
     var depth = M.lerp(2.6, 0.32, 1 - fight.stamina) * (fight.phase === 'run' ? 1.35 : 1);
+    depth = Math.max(0.18, depth + (fight.rise || 0));   // it works the depth too
     var fy = Math.max(surf - depth, bottom + 0.3);
     var jumpArc = 0;
     if (fight.jump > 0) {
@@ -1496,8 +1506,14 @@
     fy = Math.max(fy, surf - 0.5) * (1 - M.sat(jumpArc)) + (surf + jumpArc) * M.sat(jumpArc);
     if (jumpArc <= 0) fy = Math.max(surf - depth, bottom + 0.3);
 
+    /* Face along the arc it is travelling, not just straight away from the rod:
+       a fish sweeping sideways should be side-on to you, which is the whole
+       reason a big one looks big. */
     var toRod = Math.atan2(_tip[2] - fz, _tip[0] - fx);
-    var swim = toRod + Math.PI + (fight.phase === 'run' ? 0.9 : 0.2) * Math.sin(this.time * 3);
+    var lateral = (fight.weave || 0) * 1.9 + (fight.angleTarget !== undefined
+      ? M.clamp(fight.angleTarget - fight.angle, -1, 1) * 0.9 : 0);
+    var swim = toRod + Math.PI + lateral +
+      (fight.phase === 'run' ? 0.55 : 0.16) * Math.sin(this.time * 3);
     this.hookedRender = {
       fish: f, x: fx, y: fy, z: fz,
       yaw: -swim + Math.PI, pitch: M.clamp((surf - fy) * -0.12, -0.6, 0.6),
@@ -1676,6 +1692,42 @@
     }
     this.draw();
     this.frame++;
+    this.autoQuality(dt);
+  };
+
+  /* Adaptive quality.
+     I cannot test this on real hardware — there is no GPU in the environment
+     it was built in — so the renderer has to find its own level on whatever
+     machine it lands on. Frame time is sampled over a window rather than
+     per frame, because a single long frame is usually a hitch (a panel
+     opening, a shader compiling) and not a reason to drop the whole preset.
+
+     Touching the quality setting by hand switches this off for the session:
+     an explicit choice should never be silently overridden. */
+  var LADDER = ['low', 'medium', 'high', 'ultra'];
+  Game.prototype.autoQuality = function (dt) {
+    if (this.qualityLocked || !this.renderer) return;
+    var a = this.autoQ || (this.autoQ = { t: 0, n: 0, sum: 0, worst: 0, settle: 1.5 });
+    // Give the scene a moment after any change before judging it.
+    if (a.settle > 0) { a.settle -= dt; return; }
+    a.t += dt; a.n++; a.sum += dt;
+    if (dt > a.worst) a.worst = dt;
+    if (a.t < 2.5) return;
+
+    var avg = a.sum / Math.max(a.n, 1);
+    var idx = LADDER.indexOf(this.renderer.qualityName);
+    a.t = 0; a.n = 0; a.sum = 0; a.worst = 0;
+
+    // Below ~26 fps sustained, step down. Above ~58 with headroom, step up.
+    if (avg > 1 / 26 && idx > 0) {
+      this.setQuality(LADDER[idx - 1], true);
+      this.ui.showToast('Graphics turned down to ' + LADDER[idx - 1] + ' to keep it smooth. ' +
+        'Change it in [Esc] settings.', 'warn');
+      a.settle = 3;
+    } else if (avg < 1 / 58 && idx < LADDER.length - 1) {
+      this.setQuality(LADDER[idx + 1], true);
+      a.settle = 4;
+    }
   };
 
   Game.prototype.update = function (dt) {
@@ -1967,9 +2019,17 @@
     this.save();
   };
 
-  Game.prototype.setQuality = function (name) {
-    localStorage.setItem('deepcast.quality', name);
+  /* `auto` marks a change the adaptive tuner made itself. A change the player
+     made locks the tuner off for the session and is the one that gets
+     remembered — otherwise an automatic drop would persist as if it had been
+     chosen deliberately. */
+  Game.prototype.setQuality = function (name, auto) {
+    if (!auto) {
+      this.qualityLocked = true;
+      localStorage.setItem('deepcast.quality', name);
+    }
     this.renderer.setQuality(name, 190);
+    if (this.ui && this.ui.el['set-quality']) this.ui.el['set-quality'].value = name;
   };
 
   DC.Game = Game;

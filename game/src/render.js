@@ -23,11 +23,15 @@
 
   var UP_Y = new Float32Array([0, 1, 0]);
 
+  /* `dpr` caps the device-pixel ratio for the 3D buffer. A Windows desktop at
+     125% scaling reports 1.25, which is 1.6x the pixels for no visible gain in
+     a game — the HUD is DOM and stays crisp regardless.
+     `propDist` is the distance past which trees stop being drawn at all. */
   var QUALITY = {
-    low:    { scale: 0.62, refl: 0.25, refr: 0.35, bloom: false, water: 140, fishDist: 55,  reflProps: false, reflFrac: 0 },
-    medium: { scale: 0.85, refl: 0.38, refr: 0.50, bloom: true,  water: 210, fishDist: 80,  reflProps: true,  reflFrac: 0.45 },
-    high:   { scale: 1.00, refl: 0.50, refr: 0.65, bloom: true,  water: 290, fishDist: 120, reflProps: true,  reflFrac: 0.8 },
-    ultra:  { scale: 1.00, refl: 0.72, refr: 0.85, bloom: true,  water: 360, fishDist: 160, reflProps: true,  reflFrac: 1.0 }
+    low:    { scale: 0.62, refl: 0.25, refr: 0.35, bloom: false, water: 120, fishDist: 55,  reflProps: false, reflFrac: 0,    dpr: 1.0,  propDist: 150, terrainLod: true },
+    medium: { scale: 0.82, refl: 0.34, refr: 0.45, bloom: true,  water: 170, fishDist: 80,  reflProps: true,  reflFrac: 0.5,  dpr: 1.0,  propDist: 240, terrainLod: true },
+    high:   { scale: 1.00, refl: 0.45, refr: 0.55, bloom: true,  water: 240, fishDist: 120, reflProps: true,  reflFrac: 0.85, dpr: 1.25, propDist: 380, terrainLod: true },
+    ultra:  { scale: 1.00, refl: 0.65, refr: 0.75, bloom: true,  water: 320, fishDist: 160, reflProps: true,  reflFrac: 1.0,  dpr: 1.5,  propDist: 900, terrainLod: false }
   };
 
   // Float32 -> IEEE half. Used for the terrain height texture.
@@ -154,6 +158,11 @@
     return { vao: vao, count: mesh.indexCount, vb: vb, ib: ib };
   };
 
+  /* Instanced prop group.
+     The instance buffers are DYNAMIC because every pass re-uploads only the
+     instances that survive frustum and distance culling. Before this, all
+     6,825 props were drawn three times a frame whether or not they were behind
+     the camera — about 2.8 million triangles of which most were off screen. */
   Renderer.prototype.makeInstancedMesh = function (mesh, instances) {
     var gl = this.gl;
     var st = A.STRIDE * 4;
@@ -169,8 +178,12 @@
       rotTint[i * 4] = it.rot;
       rotTint[i * 4 + 1] = it.tint; rotTint[i * 4 + 2] = it.tint; rotTint[i * 4 + 3] = it.tint;
     }
-    var pb = GLX.buffer(gl, posScale);
-    var rb = GLX.buffer(gl, rotTint);
+    var pb = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, pb);
+    gl.bufferData(gl.ARRAY_BUFFER, posScale, gl.DYNAMIC_DRAW);
+    var rb = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, rb);
+    gl.bufferData(gl.ARRAY_BUFFER, rotTint, gl.DYNAMIC_DRAW);
     var vao = GLX.vao(gl, [
       { buffer: vb, loc: LOC.aPos, size: 3, stride: st, offset: 0 },
       { buffer: vb, loc: LOC.aNormal, size: 3, stride: st, offset: 12 },
@@ -179,7 +192,22 @@
       { buffer: pb, loc: LOC.iPosScale, size: 4, divisor: 1 },
       { buffer: rb, loc: LOC.iRotTint, size: 4, divisor: 1 }
     ], ib);
-    return { vao: vao, count: mesh.indexCount, instances: n, instData: instances };
+
+    /* Bounding radius of one instance at unit scale, so the cull can test a
+       sphere instead of the mesh. Measured from the mesh rather than guessed,
+       because a conifer and a lilypad are nothing like the same size. */
+    var rad2 = 0;
+    for (var v = 0; v < mesh.data.length; v += A.STRIDE) {
+      var dx = mesh.data[v], dy = mesh.data[v + 1], dz = mesh.data[v + 2];
+      var d2 = dx * dx + dy * dy + dz * dz;
+      if (d2 > rad2) rad2 = d2;
+    }
+    return {
+      vao: vao, count: mesh.indexCount, instances: n, instData: instances,
+      posScale: posScale, rotTint: rotTint, pb: pb, rb: rb,
+      radius: Math.sqrt(rad2),
+      cullPos: new Float32Array(n * 4), cullRot: new Float32Array(n * 4)
+    };
   };
 
   Renderer.prototype.uploadTerrain = function (terrain) {
@@ -194,8 +222,21 @@
         { buffer: vb, loc: LOC.aAO, size: 1, stride: st, offset: 24 },
         { buffer: vb, loc: LOC.aVar, size: 1, stride: st, offset: 28 }
       ], ib),
-      count: terrain.indexCount
+      count: terrain.indexCount,
+      chunks: terrain.chunks || null
     };
+    if (terrain.lodIndices) {
+      var lib = GLX.buffer(gl, terrain.lodIndices, gl.ELEMENT_ARRAY_BUFFER);
+      this.terrainLod = {
+        vao: GLX.vao(gl, [
+          { buffer: vb, loc: LOC.aPos, size: 3, stride: st, offset: 0 },
+          { buffer: vb, loc: LOC.aNormal, size: 3, stride: st, offset: 12 },
+          { buffer: vb, loc: LOC.aAO, size: 1, stride: st, offset: 24 },
+          { buffer: vb, loc: LOC.aVar, size: 1, stride: st, offset: 28 }
+        ], lib),
+        count: terrain.lodIndexCount
+      };
+    }
   };
 
   Renderer.prototype.uploadHeightmap = function (heights, size, extent) {
@@ -307,7 +348,7 @@
 
   Renderer.prototype.resize = function (force) {
     var gl = this.gl;
-    var dpr = Math.min(window.devicePixelRatio || 1, 2);
+    var dpr = Math.min(window.devicePixelRatio || 1, this.quality.dpr || 2);
     var cw = Math.max(1, Math.floor(this.canvas.clientWidth * dpr));
     var ch = Math.max(1, Math.floor(this.canvas.clientHeight * dpr));
     if (!force && cw === this.canvas.width && ch === this.canvas.height) return;
@@ -362,20 +403,64 @@
   };
 
   // ------------------------------------------------------------ geometry
-  Renderer.prototype._drawTerrain = function (s, vp, clip) {
+  Renderer.prototype._drawTerrain = function (s, vp, clip, lod) {
     var gl = this.gl, p = this.P.terrain;
+    var t = (lod && this.quality.terrainLod && this.terrainLod) ? this.terrainLod : this.terrain;
     gl.useProgram(p.prog);
     this._sky(p, s);
     gl.uniformMatrix4fv(p.u.uViewProj, false, vp);
     gl.uniform4fv(p.u.uClipPlane, clip);
     gl.uniform1f(p.u.uWetness, s.wetness || 1);
-    gl.bindVertexArray(this.terrain.vao);
-    gl.drawElements(gl.TRIANGLES, this.terrain.count, gl.UNSIGNED_INT, 0);
+    gl.bindVertexArray(t.vao);
+
+    // The full-detail mesh is chunked, so most of the map behind the camera
+    // never reaches the vertex shader. The LOD mesh is small enough that
+    // culling it would cost more than drawing it.
+    var ch = t.chunks;
+    if (!ch) {
+      gl.drawElements(gl.TRIANGLES, t.count, gl.UNSIGNED_INT, 0);
+      this.statChunks = 1;
+      return;
+    }
+    frustumPlanes(vp, _planes);
+    var drawn = 0;
+    for (var i = 0; i < ch.length; i++) {
+      var c = ch[i];
+      var vis = true;
+      for (var pl = 0; pl < 6; pl++) {
+        var q = pl * 4;
+        var nx = _planes[q], ny = _planes[q + 1], nz = _planes[q + 2], nd = _planes[q + 3];
+        // Positive vertex of the AABB: if even that is outside, the box is out.
+        var px = nx >= 0 ? c.maxX : c.minX;
+        var py = ny >= 0 ? c.maxY : c.minY;
+        var pz = nz >= 0 ? c.maxZ : c.minZ;
+        if (nx * px + ny * py + nz * pz + nd < 0) { vis = false; break; }
+      }
+      if (!vis) continue;
+      drawn++;
+      gl.drawElements(gl.TRIANGLES, c.count, gl.UNSIGNED_INT, c.start * 4);
+    }
+    this.statChunks = drawn;
   };
 
   // `filter`: 0 = everything, 1 = above-water props only, 2 = in-water props only.
   // `frac` thins instance counts for the cheap passes.
-  Renderer.prototype._drawProps = function (s, vp, clip, groups, filter, frac) {
+  /* Six frustum planes straight out of a view-projection matrix (Gribb-Hartmann).
+     Normalised so a plane test gives a real signed distance, which is what lets
+     the cull subtract an instance's bounding radius. */
+  var _planes = new Float32Array(24);
+  function frustumPlanes(m, out) {
+    for (var i = 0; i < 6; i++) {
+      var r = i >> 1, sgn = (i & 1) ? -1 : 1;
+      var a = m[3] + sgn * m[r], b = m[7] + sgn * m[4 + r];
+      var c = m[11] + sgn * m[8 + r], d = m[15] + sgn * m[12 + r];
+      var len = Math.hypot(a, b, c) || 1;
+      out[i * 4] = a / len; out[i * 4 + 1] = b / len;
+      out[i * 4 + 2] = c / len; out[i * 4 + 3] = d / len;
+    }
+  }
+
+  Renderer.prototype._drawProps = function (s, vp, clip, groups, filter, frac, maxDist) {
     var gl = this.gl, p = this.P.solidInst;
     gl.useProgram(p.prog);
     this._sky(p, s);
@@ -387,15 +472,53 @@
     gl.uniform1f(p.u.uEmissive, 0.0);
     gl.uniform1f(p.u.uNoFog, 0.0);
     gl.uniform3f(p.u.uBend, 0, 0, 0);
+
+    frustumPlanes(vp, _planes);
+    var cx = s.camPos[0], cy = s.camPos[1], cz = s.camPos[2];
+    var far2 = maxDist ? maxDist * maxDist : Infinity;
+    var drawn = 0, tested = 0;
+
     for (var i = 0; i < groups.length; i++) {
       var g = groups[i];
       if (!g || !g.instances) continue;
       if (filter === 1 && g.water) continue;
       if (filter === 2 && !g.water) continue;
-      var n = frac ? Math.max(1, (g.instances * frac) | 0) : g.instances;
+
+      var src = g.posScale, srcR = g.rotTint;
+      var dst = g.cullPos, dstR = g.cullRot;
+      var lim = frac ? Math.max(1, (g.instances * frac) | 0) : g.instances;
+      var n = 0;
+      for (var k = 0; k < lim; k++) {
+        var o = k * 4;
+        var x = src[o], y = src[o + 1], z = src[o + 2], sc = src[o + 3];
+        var dx = x - cx, dy = y - cy, dz = z - cz;
+        if (dx * dx + dy * dy + dz * dz > far2) continue;
+        var rad = g.radius * sc;
+        // Sphere vs frustum. Bail on the first plane that excludes it.
+        var vis = true;
+        for (var pl = 0; pl < 6; pl++) {
+          var q = pl * 4;
+          if (_planes[q] * x + _planes[q + 1] * y + _planes[q + 2] * z + _planes[q + 3] < -rad) { vis = false; break; }
+        }
+        tested++;
+        if (!vis) continue;
+        var d = n * 4;
+        dst[d] = x; dst[d + 1] = y; dst[d + 2] = z; dst[d + 3] = sc;
+        dstR[d] = srcR[o]; dstR[d + 1] = srcR[o + 1];
+        dstR[d + 2] = srcR[o + 2]; dstR[d + 3] = srcR[o + 3];
+        n++;
+      }
+      if (!n) continue;
+      drawn += n;
+      gl.bindBuffer(gl.ARRAY_BUFFER, g.pb);
+      gl.bufferSubData(gl.ARRAY_BUFFER, 0, dst, 0, n * 4);
+      gl.bindBuffer(gl.ARRAY_BUFFER, g.rb);
+      gl.bufferSubData(gl.ARRAY_BUFFER, 0, dstR, 0, n * 4);
       gl.bindVertexArray(g.vao);
       gl.drawElementsInstanced(gl.TRIANGLES, g.count, gl.UNSIGNED_INT, 0, n);
     }
+    this.statPropsDrawn = drawn;
+    this.statPropsTested = tested;
   };
 
   Renderer.prototype._drawSolid = function (s, vp, clip, mesh, model, tint, spec, emissive, noFog, bend) {
@@ -487,23 +610,27 @@
     M4.reflectionY(this.mirror, 0);
     M4.multiply(this.tmpA, this.viewProj, this.mirror);
     this.fbRefl.bind();
+    if (this._benchNoRefl) { gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT); } else {
     gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
     gl.cullFace(gl.FRONT);          // mirroring flips winding
-    this._drawTerrain(s, this.tmpA, ABOVE);
+    this._drawTerrain(s, this.tmpA, ABOVE, true);
     this._drawSolids(s, this.tmpA, ABOVE);
-    if (q.reflProps && s.propGroups) this._drawProps(s, this.tmpA, ABOVE, s.propGroups, 1, q.reflFrac);
+    if (q.reflProps && s.propGroups) this._drawProps(s, this.tmpA, ABOVE, s.propGroups, 1, q.reflFrac, q.propDist * 0.7);
     if (s.fishCount) this._drawFish(s, this.tmpA, ABOVE, s.fishCount);
+    }
     gl.cullFace(gl.BACK);
 
     // ---------------------------------------------------- 2. refraction
     this.fbRefr.bind();
     gl.clearColor(s.deepTint[0] * 0.25, s.deepTint[1] * 0.3, s.deepTint[2] * 0.32, 1);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-    this._drawTerrain(s, this.viewProj, BELOW);
-    this._drawSolids(s, this.viewProj, BELOW);
-    if (s.propGroups) this._drawProps(s, this.viewProj, BELOW, s.propGroups, 2, 1);
-    if (s.fishCount) this._drawFish(s, this.viewProj, BELOW, s.fishCount);
+    if (!this._benchNoRefr) {
+      this._drawTerrain(s, this.viewProj, BELOW, true);
+      this._drawSolids(s, this.viewProj, BELOW);
+      if (s.propGroups) this._drawProps(s, this.viewProj, BELOW, s.propGroups, 2, 1, 90);
+      if (s.fishCount) this._drawFish(s, this.viewProj, BELOW, s.fishCount);
+    }
 
     // ---------------------------------------------------- 3. main scene
     this.fbScene.bind();
@@ -512,10 +639,11 @@
 
     this._drawTerrain(s, this.viewProj, NOCLIP);
     this._drawSolids(s, this.viewProj, NOCLIP);
-    if (s.propGroups) this._drawProps(s, this.viewProj, NOCLIP, s.propGroups, 0, 1);
+    if (s.propGroups) this._drawProps(s, this.viewProj, NOCLIP, s.propGroups, 0, 1, q.propDist);
     if (s.fishCount) this._drawFish(s, this.viewProj, NOCLIP, s.fishCount);
 
     // water
+    if (!this._benchNoWater) {
     var pw = this.P.water;
     gl.useProgram(pw.prog);
     this._sky(pw, s);
@@ -537,8 +665,10 @@
     gl.bindVertexArray(this.water.vao);
     gl.drawElements(gl.TRIANGLES, this.water.count, gl.UNSIGNED_INT, 0);
     gl.enable(gl.CULL_FACE);
+    }
 
     // sky fills whatever is left
+    if (!this._benchNoSky) {
     var ps = this.P.sky;
     gl.useProgram(ps.prog);
     this._sky(ps, s);
@@ -552,6 +682,7 @@
     gl.bindVertexArray(this.fsVAO);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     gl.depthMask(true);
+    }
 
     // rod + bobber sit in world space, so they just draw normally
     if (s.rod && s.rod.visible) {

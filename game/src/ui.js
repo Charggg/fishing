@@ -238,15 +238,25 @@
     };
 
     if (this.statsOpen) {
+      /* Everything here that is not a play statistic is a number I would need
+         to diagnose a slow machine from a single screenshot, since I have no
+         GPU to reproduce on: the preset, what it is actually rendering at, and
+         how much of the scene survived culling. */
+      var r = this.game.renderer;
       e.stats.textContent =
-        'fps      ' + d.fps.toFixed(0) + '\n' +
+        'fps      ' + d.fps.toFixed(0) + (this.game.qualityLocked ? '  (manual)' : '  (auto)') + '\n' +
+        'quality  ' + r.qualityName + '\n' +
+        'render   ' + r.width + 'x' + r.height + '  dpr ' + (window.devicePixelRatio || 1) + '\n' +
+        'window   ' + r.canvas.clientWidth + 'x' + r.canvas.clientHeight + '\n' +
+        'props    ' + (r.statPropsDrawn || 0) + ' of ' + (r.statPropsTested || 0) + ' in view\n' +
+        'terrain  ' + (r.statChunks || 0) + ' chunks\n' +
+        'fish     ' + this.game.shoal.drawn + ' drawn\n' +
         'mode     ' + d.mode + '\n' +
         'casts    ' + this.game.state.casts + '\n' +
         'landed   ' + this.game.state.totalCatches + '\n' +
         'snapped  ' + this.game.state.breaks + '\n' +
         'lost     ' + this.game.state.escapes + '\n' +
-        'weight   ' + F.weight(this.game.state.totalWeight) + '\n' +
-        'fish     ' + this.game.shoal.drawn + ' drawn';
+        'weight   ' + F.weight(this.game.state.totalWeight);
     }
   };
 

@@ -1,3 +1,9 @@
+> ### 🕹️ Also in this repo: **[DEEP CAST](game/)** — a 3D fishing game
+> Raw WebGL2, no engine, no libraries, no asset files. Double-click
+> **`game/index.html`** and go fishing. → **[game/README.md](game/README.md)**
+
+---
+
 # 🎣 PondScope
 
 **Find ponds and lakes near any location — and discover the fish that live in them, how old the water is, how big it is, and more.**

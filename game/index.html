@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>DEEP CAST — a 3D fishing game</title>
+<meta name="description" content="A 3D fishing game that runs in your browser. No install, no downloads, no libraries." />
+<link rel="stylesheet" href="style.css" />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎣</text></svg>" />
+</head>
+<body>
+
+<canvas id="gl"></canvas>
+
+<!-- ============================ LOADING ============================ -->
+<div id="loading" class="overlay">
+  <div class="load-box">
+    <div class="load-title">DEEP&nbsp;CAST</div>
+    <div class="load-sub">generating the lake</div>
+    <div class="load-track"><div class="load-fill" id="load-fill"></div></div>
+    <div class="load-step" id="load-step">waking up</div>
+  </div>
+</div>
+
+<!-- ============================= START ============================= -->
+<div id="start" class="overlay hidden">
+  <div class="start-box">
+    <div class="start-title">DEEP&nbsp;CAST</div>
+    <div class="start-tag">One lake. Sixteen species. Nothing installed.</div>
+    <button class="big-btn" id="btn-play">▶ &nbsp;Start fishing</button>
+    <div class="start-keys">
+      <div><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> walk &nbsp;·&nbsp; <kbd>Shift</kbd> run &nbsp;·&nbsp; <kbd>Mouse</kbd> look</div>
+      <div><kbd>Hold&nbsp;LMB</kbd> charge a cast, release to throw</div>
+      <div><kbd>Click</kbd> the instant a fish takes it &nbsp;·&nbsp; <kbd>Hold&nbsp;LMB</kbd> to reel</div>
+      <div><kbd>Tab</kbd> journal &nbsp;·&nbsp; <kbd>B</kbd> shop &nbsp;·&nbsp; <kbd>H</kbd> help &nbsp;·&nbsp; <kbd>Esc</kbd> pause</div>
+    </div>
+    <div class="start-note">Click the window to capture the mouse. Sound is generated live — headphones recommended.</div>
+  </div>
+</div>
+
+<!-- ============================== HUD ============================== -->
+<div id="hud" class="hidden">
+
+  <div id="crosshair"><span></span></div>
+
+  <div class="hud-top">
+    <div class="hud-chip" id="chip-clock"><span class="ic" id="clock-ic">🌅</span><b id="clock-time">6:00 AM</b><i id="clock-day">Day 1</i></div>
+    <div class="hud-chip" id="chip-weather"><span class="ic" id="weather-ic">☀️</span><b id="weather-name">Clear</b></div>
+    <div class="hud-chip" id="chip-money"><span class="ic">💵</span><b id="money">$150</b></div>
+    <div class="hud-chip" id="chip-level"><span class="ic">⭐</span><b id="level">Lv 1</b><i id="xp">0 xp</i></div>
+    <div class="hud-chip" id="chip-dex"><span class="ic">📖</span><b id="dex">0/16</b></div>
+  </div>
+
+  <div class="hud-bottom">
+    <div id="lurebar"></div>
+    <div id="hint"></div>
+  </div>
+
+  <div id="rig-readout">
+    <div class="rig-row"><span>Rod</span><b id="rig-rod">Old Faithful</b></div>
+    <div class="rig-row"><span>Lure</span><b id="rig-lure">Nightcrawler</b></div>
+    <div class="rig-row" id="rig-depth-row"><span>Water</span><b id="rig-depth">—</b></div>
+    <div class="rig-row" id="rig-dist-row"><span>Cast</span><b id="rig-dist">—</b></div>
+  </div>
+
+  <div id="cast-meter" class="hidden">
+    <div class="cm-label">CAST POWER</div>
+    <div class="cm-track">
+      <div class="cm-fill" id="cm-fill"></div>
+      <div class="cm-sweet"></div>
+    </div>
+  </div>
+
+  <div id="prompt" class="hidden"></div>
+
+  <!-- ---------------------------- FIGHT ---------------------------- -->
+  <div id="fight" class="hidden">
+    <div class="fight-head"><b id="fight-name">Fish</b><span id="fight-phase">holding</span></div>
+    <div class="fight-bar">
+      <div class="fb-label">LINE TENSION</div>
+      <div class="fb-track tension"><div class="fb-fill" id="fb-tension"></div><div class="fb-danger"></div></div>
+    </div>
+    <div class="fight-bar">
+      <div class="fb-label">FISH STAMINA</div>
+      <div class="fb-track"><div class="fb-fill stam" id="fb-stamina"></div></div>
+    </div>
+    <div class="fight-bar">
+      <div class="fb-label">LINE OUT <i id="fb-dist">0.0 m</i></div>
+      <div class="fb-track"><div class="fb-fill line" id="fb-line"></div></div>
+    </div>
+    <div class="fight-drag">DRAG <span id="fb-drag">45%</span> <i>(scroll)</i></div>
+  </div>
+
+  <div id="toasts"></div>
+</div>
+
+<!-- =========================== CATCH CARD =========================== -->
+<div id="catch" class="overlay hidden">
+  <div class="catch-card" id="catch-card">
+    <div class="catch-banner" id="catch-banner">NICE CATCH</div>
+    <canvas id="catch-art" width="520" height="200"></canvas>
+    <div class="catch-name" id="catch-name">Bluegill</div>
+    <div class="catch-latin" id="catch-latin">Lepomis macrochirus</div>
+    <div class="catch-stats">
+      <div><span>Weight</span><b id="catch-weight">—</b></div>
+      <div><span>Length</span><b id="catch-length">—</b></div>
+      <div><span>Value</span><b id="catch-value">—</b></div>
+    </div>
+    <div class="catch-meter"><div class="catch-meter-fill" id="catch-grade"></div><span id="catch-grade-label">size</span></div>
+    <div class="catch-tags" id="catch-tags"></div>
+    <div class="catch-desc" id="catch-desc"></div>
+    <button class="big-btn" id="btn-catch-ok">Keep fishing</button>
+  </div>
+</div>
+
+<!-- ============================ JOURNAL ============================ -->
+<div id="journal" class="overlay panel hidden">
+  <div class="panel-box">
+    <div class="panel-head"><h2>📖 &nbsp;Field Journal</h2><button class="x" data-close="journal">✕</button></div>
+    <div class="panel-summary" id="journal-summary"></div>
+    <div class="dex-grid" id="dex-grid"></div>
+  </div>
+</div>
+
+<!-- ============================== SHOP ============================== -->
+<div id="shop" class="overlay panel hidden">
+  <div class="panel-box">
+    <div class="panel-head">
+      <h2>🛒 &nbsp;Tackle Shop</h2>
+      <div class="shop-money" id="shop-money">$150</div>
+      <button class="x" data-close="shop">✕</button>
+    </div>
+    <div class="shop-tabs">
+      <button class="tab active" data-tab="lures">Lures</button>
+      <button class="tab" data-tab="rods">Rods</button>
+      <button class="tab" data-tab="rest">Wait</button>
+    </div>
+    <div class="shop-body" id="shop-body"></div>
+  </div>
+</div>
+
+<!-- ============================== HELP ============================== -->
+<div id="help" class="overlay panel hidden">
+  <div class="panel-box">
+    <div class="panel-head"><h2>❔ &nbsp;How to fish</h2><button class="x" data-close="help">✕</button></div>
+    <div class="help-body">
+      <h3>The loop</h3>
+      <ol>
+        <li><b>Aim and hold left click.</b> The power meter fills — release to cast. Aim slightly above the water; the line arcs.</li>
+        <li><b>Wait.</b> The bobber sits. Fish that like your lure, at that depth, at that hour, come to look.</li>
+        <li><b>Watch the bobber.</b> Small dips are a fish tasting it. When it <i>plunges</i> and the screen shouts at you, click.</li>
+        <li><b>Fight it.</b> Hold left click to reel. That loads the line. Let go to give slack when it runs, or the line snaps.</li>
+      </ol>
+      <h3>Reading the fight</h3>
+      <p>The <b>tension</b> bar is the only thing that can kill you. Pinned in the red for about half a second and the line parts.
+         When a fish is <i>running</i>, stop reeling. When it is <i>giving</i>, wind like mad.
+         <b>Drag</b> (mouse wheel) trades speed for safety: high drag gains line faster but loads the rod harder.</p>
+      <h3>What makes fish bite</h3>
+      <ul>
+        <li><b>Depth.</b> Each lure fishes at its own depth. A deep jig will never find a bluegill in the reeds.</li>
+        <li><b>Time.</b> Walleye and brown trout are night fish. Bass hunt at dawn and dusk. Some things only exist after midnight.</li>
+        <li><b>Weather.</b> Rain and storms bring out the big ones. Fog hides the rare stuff.</li>
+        <li><b>Where you cast.</b> There is a deep hole out to the north-east and a weed flat to the south-west. They hold different fish.</li>
+      </ul>
+      <h3>Controls</h3>
+      <div class="keygrid">
+        <div><kbd>W A S D</kbd> walk</div><div><kbd>Shift</kbd> run</div>
+        <div><kbd>Mouse</kbd> look</div><div><kbd>LMB</kbd> cast / hook / reel</div>
+        <div><kbd>RMB</kbd> cancel / reel in</div><div><kbd>Wheel</kbd> lure (or drag, mid-fight)</div>
+        <div><kbd>1</kbd>…<kbd>7</kbd> pick lure</div><div><kbd>F</kbd> next lure</div>
+        <div><kbd>R</kbd> reel in</div><div><kbd>Tab</kbd> journal</div>
+        <div><kbd>B</kbd> shop</div><div><kbd>P</kbd> stats</div>
+        <div><kbd>H</kbd> this screen</div><div><kbd>Esc</kbd> pause</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================== PAUSE ============================= -->
+<div id="pause" class="overlay panel hidden">
+  <div class="panel-box narrow">
+    <div class="panel-head"><h2>⏸ &nbsp;Paused</h2></div>
+    <div class="settings">
+      <label class="set-row"><span>Graphics</span>
+        <select id="set-quality">
+          <option value="low">Low</option>
+          <option value="medium">Medium</option>
+          <option value="high" selected>High</option>
+          <option value="ultra">Ultra</option>
+        </select>
+      </label>
+      <label class="set-row"><span>Master volume</span><input type="range" id="set-master" min="0" max="100" value="85" /></label>
+      <label class="set-row"><span>Music</span><input type="range" id="set-music" min="0" max="100" value="55" /></label>
+      <label class="set-row"><span>Sound effects</span><input type="range" id="set-sfx" min="0" max="100" value="90" /></label>
+      <label class="set-row"><span>Look sensitivity</span><input type="range" id="set-sens" min="20" max="300" value="100" /></label>
+      <label class="set-row"><span>Field of view</span><input type="range" id="set-fov" min="55" max="100" value="70" /></label>
+      <label class="set-row check"><span>Invert look</span><input type="checkbox" id="set-invert" /></label>
+    </div>
+    <div class="pause-buttons">
+      <button class="big-btn" id="btn-resume">Resume</button>
+      <button class="ghost-btn" id="btn-help2">How to fish</button>
+      <button class="ghost-btn danger" id="btn-reset">Erase save</button>
+    </div>
+    <div class="pause-foot">Built with WebGL2 and the Web Audio API. No engine, no libraries, no assets.</div>
+  </div>
+</div>
+
+<!-- ============================== STATS ============================= -->
+<div id="stats" class="hidden"></div>
+
+<!-- ============================== FATAL ============================= -->
+<div id="fatal" class="overlay hidden">
+  <div class="load-box">
+    <div class="load-title">Well, that's not right.</div>
+    <div class="fatal-msg" id="fatal-msg"></div>
+    <div class="load-sub">DEEP CAST needs WebGL2. Try a recent Chrome, Edge, Firefox or Safari.</div>
+  </div>
+</div>
+
+<script src="src/util.js"></script>
+<script src="src/gl.js"></script>
+<script src="src/shaders.js"></script>
+<script src="src/assets.js"></script>
+<script src="src/species.js"></script>
+<script src="src/world.js"></script>
+<script src="src/entities.js"></script>
+<script src="src/audio.js"></script>
+<script src="src/render.js"></script>
+<script src="src/ui.js"></script>
+<script src="src/game.js"></script>
+<script src="src/main.js"></script>
+</body>
+</html>

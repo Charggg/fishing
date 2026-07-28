@@ -159,7 +159,8 @@
       quest: 0,            // index into DC.Quests.LIST
       questCount: 0,       // qualifying catches toward the current one
       questSpots: [],      // distinct spot ids counted, for "three spots" goals
-      questsDone: []
+      questsDone: [],
+      demoKit: false      // set once index.html?demo has topped you up
     };
   };
 
@@ -175,9 +176,31 @@
   /* ====================================================================== */
   /*  BOOT                                                                  */
   /* ====================================================================== */
+  /* Demo kit: open index.html?demo to skip the earn-your-gear curve and see
+     the whole game in one sitting. Applied once and recorded in the save, so
+     reloading does not keep topping you up, and it never touches a save that
+     already has it. Normal play is unaffected. */
+  Game.prototype.applyDemoKit = function () {
+    var st = this.state;
+    if (st.demoKit) return false;
+    st.demoKit = true;
+    st.money = Math.max(st.money, 30000);
+    st.rods = Sp.RODS.map(function (r) { return r.id; });
+    st.lures = Sp.LURES.map(function (l) { return l.id; });
+    st.gear = Sp.GEAR.map(function (g) { return g.id; });
+    st.rod = 'baitcast';
+    st.boatSeen = true;
+    this.save();
+    return true;
+  };
+
   Game.prototype.boot = function () {
     var self = this;
     this.load();
+    /* Before any of the boot steps: the UI builds itself from this state once
+       loading finishes, so the kit has to be in place by then. main.js raises
+       the toast, because the UI is not attached to the game until then. */
+    if (/(^|[?&])demo\b/.test(location.search)) this.demoGranted = this.applyDemoKit();
     var steps = [
       ['Carving the basin', function () {
         self.world = new DC.World(self.state.seed);

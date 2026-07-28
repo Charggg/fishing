@@ -24,6 +24,10 @@
       origHide();
       ui.attach(game);
       ui.refreshLureBar();
+      // index.html?demo tops up a fresh save; say so once the UI can show it.
+      if (game.demoGranted) {
+        ui.showToast('Demo kit: every rod and lure, the sounder, and $30,000.', 'good');
+      }
     };
 
     window.DEEPCAST = game;   // handy in the console; harmless otherwise

@@ -20,6 +20,8 @@ const SUITE = [
     what: 'first-person rod/hand geometry' },
   { name: 'render-smoke', kind: 'gate', args: ['render-smoke.js'],
     what: 'real boot, clicks, quality presets, save/reload, resize' },
+  { name: 'demokit', kind: 'gate', args: ['demokit.js'],
+    what: 'index.html?demo grants the kit once and only once' },
   { name: 'questplay', kind: 'gate', args: ['questplay.js'],
     what: 'commission chain is completable end to end' },
   { name: 'spotbias', kind: 'tuning', args: ['spotbias.js', '10'],

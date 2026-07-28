@@ -6,19 +6,14 @@
    Run:  node game/qa/harness.js [sessions]
    Exits non-zero if any invariant fails, so it can gate a commit.
    ========================================================================= */
-const { chromium } = require('playwright-core');
+const pw = require('./pw');
 const path = require('path');
 
 const GAME = 'file://' + path.resolve(__dirname, '..', 'index.html');
-const CHROME = '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
 const SESSIONS = parseInt(process.argv[2] || '3', 10);
 
 (async () => {
-  const browser = await chromium.launch({
-    executablePath: CHROME,
-    args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader',
-      '--no-sandbox', '--disable-dev-shm-usage', '--autoplay-policy=no-user-gesture-required']
-  });
+  const browser = await pw.launch(['--autoplay-policy=no-user-gesture-required']);
   const page = await browser.newPage({ viewport: { width: 900, height: 520 } });
 
   const errors = [];
@@ -89,6 +84,45 @@ const SESSIONS = parseInt(process.argv[2] || '3', 10);
       if (b.aboard && Math.hypot(s.camPos[0] - b.x, s.camPos[2] - b.z) > 3) fail(tag + ': camera drifted off the boat');
       for (let u = 0; u < 3; u++) if (!finite(s.up[u])) fail(tag + ': camera up not finite');
       if (Math.abs(s.up[1]) < 0.5) fail(tag + ': camera up nearly horizontal (' + s.up[1].toFixed(2) + ')');
+
+      /* The rod is a viewmodel built in camera space, so a sign error in the
+         camera basis silently mounts it upside down and nothing else breaks.
+         Assert the tip is above the grip and pointing away from the eye.
+
+         All of this has to be measured against the CAMERA's up, not world Y.
+         The rod is welded to the view, so looking down tips it below the
+         horizon and looking up lifts the grip over the eye — both perfectly
+         correct, and both of which a world-space version of this check calls
+         a failure. */
+      const rm = s.rod.matrix;
+      const fw = s.forward, wu = s.up;
+      let rx = fw[1] * wu[2] - fw[2] * wu[1],
+        ry = fw[2] * wu[0] - fw[0] * wu[2],
+        rz = fw[0] * wu[1] - fw[1] * wu[0];
+      const rl = Math.hypot(rx, ry, rz) || 1;
+      rx /= rl; ry /= rl; rz /= rl;
+      const ux = ry * fw[2] - rz * fw[1],
+        uy = rz * fw[0] - rx * fw[2],
+        uz = rx * fw[1] - ry * fw[0];
+      // Rod axis (local +Y) and grip offset, both projected onto camera up.
+      const axisUp = rm[4] * ux + rm[5] * uy + rm[6] * uz;
+      const gripUp = (rm[12] - s.camPos[0]) * ux + (rm[13] - s.camPos[1]) * uy +
+        (rm[14] - s.camPos[2]) * uz;
+      if (!finite(axisUp) || !finite(gripUp)) fail(tag + ': rod transform not finite');
+      /* Only the rest pose. A cast deliberately whips the rod back past
+         vertical, so axisUp goes negative for a few frames every cast and that
+         is the animation working, not a broken basis. The bug this guards
+         against lives in the camera basis and shows up at rest too. */
+      const atRest = g.castAnim <= 0 && g.mode !== 'charging';
+      if (atRest) {
+        if (axisUp <= 0) fail(tag + ': rod is upside down (axis dot camera-up ' +
+          axisUp.toFixed(2) + ')');
+        if (gripUp > 0.05) fail(tag + ': rod grip is above eye level (' + gripUp.toFixed(2) + ')');
+        const rdx = rm[4] * 2.45, rdy = rm[5] * 2.45, rdz = rm[6] * 2.45;
+        if (rdx * s.forward[0] + rdy * s.forward[1] + rdz * s.forward[2] <= 0) {
+          fail(tag + ': rod points back at the camera');
+        }
+      }
 
       // Commissions must stay in range and never go backwards.
       const qi = g.state.quest;

@@ -58,19 +58,24 @@
     <div id="hint"></div>
   </div>
 
-  <div id="rig-readout">
-    <div class="rig-row"><span>Rod</span><b id="rig-rod">Old Faithful</b></div>
-    <div class="rig-row"><span>Lure</span><b id="rig-lure">Nightcrawler</b></div>
-    <div class="rig-row" id="rig-depth-row"><span>Water</span><b id="rig-depth">—</b></div>
-    <div class="rig-row" id="rig-dist-row"><span>Cast</span><b id="rig-dist">—</b></div>
-    <div class="rig-row hidden" id="rig-boat-row"><span>Boat</span><b id="rig-boat">—</b></div>
-    <div class="rig-row hidden" id="rig-spot-row"><span>Spot</span><b id="rig-spot">—</b></div>
-  </div>
+  <!-- One flow column. The rig readout grows a row when you board the boat and
+       another when you reach a spot, so anything below it has to stack rather
+       than sit at a fixed offset. -->
+  <div id="hud-left">
+    <div id="rig-readout">
+      <div class="rig-row"><span>Rod</span><b id="rig-rod">Old Faithful</b></div>
+      <div class="rig-row"><span>Lure</span><b id="rig-lure">Nightcrawler</b></div>
+      <div class="rig-row" id="rig-depth-row"><span>Water</span><b id="rig-depth">—</b></div>
+      <div class="rig-row" id="rig-dist-row"><span>Cast</span><b id="rig-dist">—</b></div>
+      <div class="rig-row hidden" id="rig-boat-row"><span>Boat</span><b id="rig-boat">—</b></div>
+      <div class="rig-row hidden" id="rig-spot-row"><span>Spot</span><b id="rig-spot">—</b></div>
+    </div>
 
-  <div id="commission" class="hidden">
-    <div class="cm-head"><span class="cm-icon">📋</span><b id="cm-title">—</b><i id="cm-count"></i></div>
-    <div class="cm-goal" id="cm-goal">—</div>
-    <div class="cm-bar"><div class="cm-bar-fill" id="cm-bar"></div></div>
+    <div id="commission" class="hidden">
+      <div class="cm-head"><span class="cm-icon">📋</span><b id="cm-title">—</b><i id="cm-count"></i></div>
+      <div class="cm-goal" id="cm-goal">—</div>
+      <div class="cm-bar"><div class="cm-bar-fill" id="cm-bar"></div></div>
+    </div>
   </div>
 
   <div id="cast-meter" class="hidden">

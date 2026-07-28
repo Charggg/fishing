@@ -1,9 +1,8 @@
 /* Play the commission chain end to end with a scripted angler. */
-const { chromium } = require('playwright-core');
+const pw = require('./pw');
 const path = require('path');
 (async () => {
-  const b = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome',
-    args: ['--use-gl=angle','--use-angle=swiftshader','--enable-unsafe-swiftshader','--no-sandbox','--disable-dev-shm-usage'] });
+  const b = await pw.launch();
   const p = await b.newPage({ viewport: { width: 900, height: 560 } });
   const errs = [];
   p.on('pageerror', e => errs.push('PAGEERROR ' + e.message + ' | ' + (e.stack||'').split('\n')[1]));

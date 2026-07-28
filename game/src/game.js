@@ -72,6 +72,9 @@
     this.strikeTimer = 0;
     this.castPower = 0;
     this.castAnim = 0;
+    /* Crank angle. Zero puts the knob at the top of its circle, which is the
+       furthest the left hand ever gets from the right one — hang it at the
+       bottom instead and the two hands stack into a single lump of flesh. */
     this.reelSpin = 0;
     this.rodBend = new Float32Array(3);
     this.flash = 0;
@@ -118,7 +121,10 @@
       lineColor: new Float32Array([0.92, 0.95, 1.0, 0.5]),
       lineCount: 0, particleCount: 0, rippleCount: 0, fishCount: 0,
       particles: this.particles,
-      rod: { visible: true, matrix: M4.create(), handleMatrix: M4.create(), emissive: 0.02 },
+      rod: {
+        visible: true, matrix: M4.create(), handleMatrix: M4.create(),
+        handL: M4.create(), handR: M4.create(), emissive: 0.02
+      },
       bobber: { visible: false, matrix: M4.create(), glow: 0 },
       propGroups: null
     };
@@ -197,6 +203,14 @@
         r.meshRod = r.makeSolidMesh(A.buildRod());
         r.meshReelHandle = r.makeSolidMesh(A.buildReelHandle());
         r.meshBobber = r.makeSolidMesh(A.buildBobber());
+        /* Two hands, two forearms. The left one starts higher up the rod and
+           further from the eye, so it needs a longer arm to clear the bottom
+           of the frame instead of ending in mid-air. */
+        r.meshHandR = r.makeSolidMesh(A.buildHand(HAND_RIG_R));
+        r.meshHandL = r.makeSolidMesh(A.buildHand(HAND_RIG_L));
+        // Stashed for qa/viewmodel.js, which checks both arms leave the frame.
+        self.scene.rod.armTipR = A.handArmTip(HAND_RIG_R);
+        self.scene.rod.armTipL = A.handArmTip(HAND_RIG_L);
         r.meshBoat = r.makeSolidMesh(A.buildBoat());
         r.meshOar = r.makeSolidMesh(A.buildOar());
         r.setQuality(self.detectQuality(), 190);
@@ -1060,6 +1074,13 @@
   var _m = M4.create(), _m2 = M4.create();
   // Viewmodel scale: a real 2.4 m rod fills the whole screen at arm's length.
   var ROD_SCALE = 0.82;
+  var HAND_SCALE = 1.02;
+  var HAND_RIG_R = { armLen: 0.40, armAngle: Math.PI * 0.92 };
+  /* On screen the grip hand sits almost directly below the crank hand, so an
+     arm dropped straight down from the crank runs through the fist below it
+     and the two limbs fuse into one column of flesh. Angle it inboard instead
+     — which is also where the left elbow really is. */
+  var HAND_RIG_L = { armLen: 0.80, armAngle: Math.PI * 0.869 };
   /* Camera-to-world built straight from the scene camera. Deriving it here
      rather than borrowing the renderer's copy keeps the rod exact even on a
      frame that never drew (headless sim, or a stalled tab). */
@@ -1077,8 +1098,10 @@
     var ux = ry * fz - rz * fy;
     var uy = rz * fx - rx * fz;
     var uz = rx * fy - ry * fx;
+    // Columns are [right, up, back, eye]. `back` is -forward; `up` is NOT
+    // negated — getting that wrong mounts the whole viewmodel upside down.
     out[0] = rx; out[1] = ry; out[2] = rz; out[3] = 0;
-    out[4] = -ux; out[5] = -uy; out[6] = -uz; out[7] = 0;
+    out[4] = ux; out[5] = uy; out[6] = uz; out[7] = 0;
     out[8] = -fx; out[9] = -fy; out[10] = -fz; out[11] = 0;
     out[12] = eye[0]; out[13] = eye[1]; out[14] = eye[2]; out[15] = 1;
     return out;
@@ -1093,29 +1116,61 @@
     var whip = Math.sin(M.sat(this.castAnim) * Math.PI) * (1 - this.castAnim) * 2.4;
 
     // Hold position in view space, then lift into world space.
-    var tiltX = -1.02 + charge * 1.15 - whip * 0.95;
-    var tiltZ = -0.44 - charge * 0.18;
+    var tiltX = -0.98 + charge * 1.22 - whip * 0.95;
+    var tiltZ = -0.34 - charge * 0.18;
     var sway = Math.sin(p.bobPhase * 0.5) * 0.02;
 
     if (this.mode === 'fighting') {
-      tiltX = -1.28 - this.fight.tension * 0.34;
-      tiltZ = -0.48;
+      tiltX = -1.05 - this.fight.tension * 0.34;
+      tiltZ = -0.34;
     }
 
+    /* Hold pose. The butt of the grip has to stay inside the frame, or the rod
+       reads as a pole floating in the corner with nothing holding it: at a 70
+       degree vertical FOV a point at view z = -0.64 falls off the bottom edge
+       once y drops below about -0.45, which the old pose did. */
     M4.identity(_m);
-    M4.translate(_m, _m, [0.40, -0.50 + sway, -0.40]);
+    M4.translate(_m, _m, [0.33, -0.40 + sway, -0.64]);
     M4.rotateZ(_m, _m, tiltZ);
     M4.rotateX(_m, _m, tiltX);
     M4.scale(_m, _m, [ROD_SCALE, ROD_SCALE, ROD_SCALE]);
     M4.multiply(s.rod.matrix, cw, _m);
 
-    // Reel handle spins while retrieving or fighting.
+    // Reel handle spins while retrieving or fighting. The axle lies across the
+    // rod, so the crank turns about local X.
     var reeling = this.mouse.down && (this.mode === 'fishing' || this.mode === 'fighting' || this.mode === 'flying');
     this.reelSpin += dt * (reeling ? 13 : 0);
+    var seat = A.REEL_SEAT;
     M4.identity(_m2);
-    M4.translate(_m2, _m2, [0.055 * ROD_SCALE, 0.315 * ROD_SCALE, -0.115 * ROD_SCALE]);
-    M4.rotateZ(_m2, _m2, this.reelSpin);
+    M4.translate(_m2, _m2, [seat[0] * ROD_SCALE, seat[1] * ROD_SCALE, seat[2] * ROD_SCALE]);
+    M4.rotateX(_m2, _m2, this.reelSpin);
     M4.multiply(s.rod.handleMatrix, s.rod.matrix, _m2);
+
+    // Right hand wraps the cork grip. Kept low on the butt so it stays clear
+    // of the left hand at the reel — closer together they merge into one lump.
+    M4.identity(_m2);
+    M4.translate(_m2, _m2, [0, 0.075 * ROD_SCALE, 0]);
+    M4.rotateY(_m2, _m2, -0.34);
+    M4.scale(_m2, _m2, [HAND_SCALE, HAND_SCALE, HAND_SCALE]);
+    M4.multiply(s.rod.handR, s.rod.matrix, _m2);
+
+    /* Left hand rides the crank knob so it orbits while line is coming in —
+       the clearest read in the game that you are actually reeling.
+
+       Its POSITION follows the knob but its ORIENTATION comes from the rod,
+       never from the spinning handle. Parenting the whole hand to the crank
+       (as this used to) swings a 34 cm forearm through a full circle every
+       revolution, which on screen is a bare arm sweeping across the sky like
+       a boom. Only the hand should orbit; the forearm stays pointing down. */
+    var ks = Math.sin(this.reelSpin), kc = Math.cos(this.reelSpin);
+    M4.identity(_m2);
+    M4.translate(_m2, _m2, [(seat[0] + 0.055) * ROD_SCALE,
+      (seat[1] + A.CRANK_R * kc) * ROD_SCALE,
+      (seat[2] + A.CRANK_R * ks) * ROD_SCALE]);
+    M4.rotateY(_m2, _m2, 0.22);
+    M4.rotateZ(_m2, _m2, -0.30);            // knuckles rolled onto the knob
+    M4.scale(_m2, _m2, [HAND_SCALE, HAND_SCALE, HAND_SCALE]);
+    M4.multiply(s.rod.handL, s.rod.matrix, _m2);
 
     // Bend the blank toward whatever is pulling on it.
     var bendAmt = 0;

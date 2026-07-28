@@ -18,8 +18,19 @@ QA harness clean. It is not yet *massive* or *addictive* — that is the job.
 | Screenshots | `node game/qa/shots.js` | Eyes on it. Software rendering, so ignore the FPS numbers. |
 | Spot balance | `node game/qa/spotbias.js` | Fishes every spot and tallies the species. A tuning instrument, not a gate. |
 | Quest chain | `node game/qa/questplay.js` | A bot that reads the chart and plays the commission chain. Proves it is completable. |
+| Viewmodel | `node game/qa/viewmodel.js --probe` | Measures where the rod, hands and forearms land on screen across a whole crank revolution. Exits non-zero. Drop `--probe` to also render the rod with pieces suppressed one at a time. |
+| Crop | `node game/qa/crop.js <png> <x> <y> <w> <h> [zoom]` | Zooms into a screenshot. There is no image library here, so it borrows the browser's canvas. |
 
 **Rule:** never leave the tree with a failing harness. Run both before saying done.
+
+**On the viewmodel specifically:** it cannot be checked by reading the code, and
+it cannot be checked by glancing at a screenshot either — I "verified" the rod
+twice by eye while it was mounted upside down, because I was looking for *is the
+rod visible* instead of *is it the right way up*. Measure it. Every rule in
+`viewmodel.js` exists because something shipped broken past a visual check.
+
+QA scripts resolve Playwright through `game/qa/pw.js`, so they run with a plain
+`node game/qa/<script>.js` from any directory — no `NODE_PATH` needed.
 
 ---
 
@@ -42,6 +53,31 @@ QA harness clean. It is not yet *massive* or *addictive* — that is the job.
 - [ ] No frame-rate adaptive quality. A weak GPU just runs slowly forever.
 
 ### Fixed
+- [x] **2026-07-28** *(user-reported)* The rod viewmodel was mounted upside
+      down. `cameraBasis()` negated the up column, so the whole first-person
+      rig was inverted — the player read as holding the rod overhead from knee
+      height. Shipped past two of my own visual checks.
+- [x] **2026-07-28** The left hand was parented to the spinning crank knob, so
+      its 34 cm forearm swung through a full circle every revolution and read
+      on screen as a bare arm sweeping across the sky. The hand's *position*
+      now follows the knob; its *orientation* comes from the rod.
+- [x] **2026-07-28** Both forearms ended inside the frame — severed stumps
+      floating over the water, since the elbow is never modelled. Arms are now
+      long enough to leave the frame, and `viewmodel.js` asserts it.
+- [x] **2026-07-28** The left forearm ran straight through the right fist and
+      the two limbs fused into one column of flesh. Splayed inboard, and the
+      probe now measures the clearance.
+- [x] **2026-07-28** The shirt cuff was positioned off a different angle than
+      the arm it belonged to, so it floated beside the arm instead of on it.
+- [x] **2026-07-28** The reel crank arm lay *along* its own spin axis, so the
+      handle turned without ever appearing to move. Axle now lies across the
+      rod and the arm radiates from it.
+- [x] **2026-07-28** `#commission` sat at a hardcoded `top: 138px` while the
+      rig readout above it grows a row aboard the boat and another on a spot —
+      the banner covered the Spot row. Both are now one flex column.
+- [x] **2026-07-28** The harness's own rod invariant was wrong twice over: it
+      measured against world Y (so looking up or down "failed"), and it did not
+      exempt the cast whip (which deliberately swings the rod past vertical).
 - [x] **2026-07-28** `reelIn()` during a fight stranded the hooked fish
       invisible and permanently removed it from the shoal.
 - [x] **2026-07-28** Field journal threw on a save that had a catch count but
@@ -207,6 +243,31 @@ Ordered by how much each one changes the experience, not by how hard it is.
   species and spots, that a non-matching catch never advances the chain, and
   that all twelve complete and pay out.
 
+### 2026-07-28 — Session 5 (autonomous)
+The player looked at the screenshots and said the angler seemed to be holding
+the rod "insanely high" with the view "at the knees". They were right, and the
+cause was mine: `cameraBasis()` negated the up column, mounting the entire
+viewmodel upside down. I had visually signed off on that rod twice.
+
+- Fixed the basis, then rebuilt the whole first-person rig around it: two hands
+  with separate arm rigs, a reel that reads as a reel (foot, stem, gearbox,
+  lipped spool with line on it, bail wire) instead of two bare cylinders, and a
+  crank whose arm actually sweeps when it turns.
+- Wrote `qa/viewmodel.js`. It samples the rig across a full crank revolution and
+  asserts: rod upright and on screen, grip below eye level, both hands in frame
+  the whole way round, both forearms leaving the bottom edge, and neither
+  forearm passing through the opposite hand. Every one of those rules is a bug
+  it found. The left-arm angle was *solved* from measured samples rather than
+  guessed — see the note at the bottom of this file.
+- Wrote `qa/crop.js` (zoom into a screenshot) and `qa/pw.js` (Playwright
+  resolver). The QA scripts had only ever run because I was setting `NODE_PATH`
+  by hand; any future session would have hit a module-not-found wall.
+- Fixed the harness's rod invariant, which was wrong in two independent ways
+  and had never actually been executed.
+- Fixed the commission banner covering the Spot row of the rig readout.
+- Verified: harness 2 sessions ✓, render smoke ✓, questplay 12/12 ✓,
+  viewmodel probe ✓, seven screenshots reviewed by eye.
+
 ### 2026-07-28 — Session 1
 - Built the game: renderer, world, fish AI, fight sim, audio, UI, saves.
 
@@ -251,3 +312,12 @@ their band is a one-line experiment; run `spotbias.js` before and after.
 - **Everything is procedural and seeded.** Adding a binary asset breaks the
   premise. Generate it.
 - **Never break `file://`.** No modules, no build step, plain script tags.
+- **Solve the viewmodel, don't eyeball it.** The hand rig sits behind several
+  chained rotations, so "swing the arm left" is not a direction you can guess —
+  when I splayed the left arm to clear the right fist it moved *toward* it, and
+  the next guess overshot off the frame entirely. What worked: take three
+  measured samples from `viewmodel.js`, fit the local-direction → screen-delta
+  map, and solve for the angle that clears the other hand while still leaving
+  the frame. Two runs instead of ten.
+- **The viewmodel is the one thing the player stares at for hours.** It is
+  ~2% of the triangles and it was the only thing they commented on.

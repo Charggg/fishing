@@ -1,16 +1,12 @@
 /* Real-browser smoke: genuine clicks and keystrokes, every quality preset,
    save/reload, resize. Catches GL and DOM faults the sim harness cannot.
    Usage: node game/qa/render-smoke.js                                       */
-const { chromium } = require('playwright-core');
+const pw = require('./pw');
 const path = require('path');
 const GAME = 'file://' + path.resolve(__dirname, '..', 'index.html');
 
 (async () => {
-  const browser = await chromium.launch({
-    executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome',
-    args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader',
-      '--no-sandbox', '--disable-dev-shm-usage', '--autoplay-policy=no-user-gesture-required']
-  });
+  const browser = await pw.launch(['--autoplay-policy=no-user-gesture-required']);
   const page = await browser.newPage({ viewport: { width: 1100, height: 640 } });
   const errs = [];
   page.on('pageerror', e => errs.push('PAGEERROR ' + e.message));

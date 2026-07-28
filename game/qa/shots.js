@@ -1,7 +1,7 @@
 /* Screenshot rig. Drives the real game, freezes the sim, and captures frames.
    Software rendering here, so ignore FPS — this is for eyes only.
    Usage: node game/qa/shots.js [outDir]                                     */
-const { chromium } = require('playwright-core');
+const pw = require('./pw');
 const path = require('path');
 const fs = require('fs');
 
@@ -67,11 +67,7 @@ const SHOTS = [
 
 (async () => {
   fs.mkdirSync(OUT, { recursive: true });
-  const browser = await chromium.launch({
-    executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome',
-    args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader',
-      '--no-sandbox', '--disable-dev-shm-usage']
-  });
+  const browser = await pw.launch();
   const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
   const errs = [];
   page.on('pageerror', e => errs.push(e.message));

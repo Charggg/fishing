@@ -7,18 +7,14 @@
    Read the output, do not assert on it — this is a tuning instrument, not a
    pass/fail gate. Randomness means small counts swing.
    ========================================================================= */
-const { chromium } = require('playwright-core');
+const pw = require('./pw');
 const path = require('path');
 
 const GAME = 'file://' + path.resolve(__dirname, '..', 'index.html');
 const N = parseInt(process.argv[2] || '14', 10);
 
 (async () => {
-  const browser = await chromium.launch({
-    executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome',
-    args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader',
-      '--no-sandbox', '--disable-dev-shm-usage']
-  });
+  const browser = await pw.launch();
   const page = await browser.newPage({ viewport: { width: 640, height: 400 } });
   page.on('pageerror', e => console.log('ERR ' + e.message));
   await page.goto(GAME);

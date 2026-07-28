@@ -169,8 +169,13 @@ kbd {
 #chip-money b { color: var(--good); }
 #chip-level b { color: var(--accent-2); }
 
-#rig-readout {
+/* Left HUD column: rig readout, then the active commission beneath it. */
+#hud-left {
   position: absolute; top: 14px; left: 14px;
+  display: flex; flex-direction: column; align-items: flex-start; gap: 10px;
+}
+
+#rig-readout {
   background: var(--glass); border: 1px solid var(--line);
   border-radius: var(--radius); padding: 10px 14px;
   font-size: 12.5px; min-width: 168px;
@@ -512,7 +517,6 @@ kbd {
 
 /* -------------------------------------------------------- commissions */
 #commission {
-  position: absolute; left: 14px; top: 138px;
   width: 232px; padding: 10px 13px;
   background: var(--glass); border: 1px solid var(--line);
   border-left: 3px solid var(--accent-2);

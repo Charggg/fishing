@@ -557,6 +557,8 @@
     if (s.rod && s.rod.visible) {
       this._drawSolid(s, this.viewProj, NOCLIP, this.meshRod, s.rod.matrix, [1, 1, 1], 0.35, s.rod.emissive || 0, true, s.rod.bend);
       this._drawSolid(s, this.viewProj, NOCLIP, this.meshReelHandle, s.rod.handleMatrix, [1, 1, 1], 0.5, s.rod.emissive || 0, true, null);
+      if (this.meshHandR) this._drawSolid(s, this.viewProj, NOCLIP, this.meshHandR, s.rod.handR, [1, 1, 1], 0.06, s.rod.emissive || 0, true, null);
+      if (this.meshHandL) this._drawSolid(s, this.viewProj, NOCLIP, this.meshHandL, s.rod.handL, [1, 1, 1], 0.06, s.rod.emissive || 0, true, null);
     }
     if (s.bobber && s.bobber.visible) {
       this._drawSolid(s, this.viewProj, NOCLIP, this.meshBobber, s.bobber.matrix, [1, 1, 1], 0.5, s.bobber.glow || 0, false);

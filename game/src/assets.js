@@ -654,22 +654,165 @@
         m.append(gr, 0, base + t1 * total - 0.02, 0, 1, 0);
       }
     }
-    // Reel: seat, spool, handle.
-    var reel = new Mesh();
-    addCylinder(reel, 0.055, 0.055, 0.075, 12, [0.16, 0.17, 0.2], [0.16, 0.17, 0.2], 0, 0, true, true);
-    m.append(reel, 0.0, 0.30, -0.075, 1, 0);
-    var spool = new Mesh();
-    addCylinder(spool, 0.062, 0.062, 0.045, 14, [0.72, 0.74, 0.78], [0.72, 0.74, 0.78], 0, 0, true, true);
-    m.append(spool, 0.0, 0.315, -0.115, 1, 0);
-    addBox(m, 0.0, 0.30, -0.045, 0.035, 0.09, 0.06, [0.18, 0.19, 0.22], 0);
+    /* Spinning reel, hanging under the blank on its stem. Two bare coaxial
+       cylinders (what this used to be) read as a claw from the viewmodel
+       angle; it needs the silhouette a reel actually has — foot, stem, body,
+       then a lipped spool with line on it. */
+    /* Light enough to read. The reel hangs on the shaded side of the blank,
+       so anything as dark as the graphite here renders as one black blob and
+       the shape work is wasted. */
+    var body = [0.34, 0.36, 0.41];
+    var bodyL = [0.50, 0.53, 0.58];
+    var lineCol = [0.82, 0.83, 0.78];
+
+    addBox(m, 0.0, 0.30, -0.038, 0.030, 0.075, 0.048, bodyL, 0);   // foot on the blank
+    addBox(m, 0.0, 0.302, -0.072, 0.024, 0.052, 0.036, body, 0);   // stem
+
+    var housing = new Mesh();                                       // gearbox
+    addCylinder(housing, 0.034, 0.034, 0.056, 12, body, body, 0, 0, true, true);
+    m.append(housing, 0.0, 0.276, -0.108, 1, 0);
+    addBox(m, 0.0, 0.307, -0.108, 0.046, 0.028, 0.062, bodyL, 0);
+
+    // Rotor cup, then the spool: a line pack sandwiched between two flanges,
+    // which is the read that says "reel" at a glance.
+    var rotor = new Mesh();
+    addCylinder(rotor, 0.038, 0.040, 0.028, 14, body, bodyL, 0, 0, false, true);
+    m.append(rotor, 0.0, 0.338, -0.108, 1, 0);
+    var lip = new Mesh();
+    addCylinder(lip, 0.042, 0.042, 0.008, 14, bodyL, bodyL, 0, 0, true, true);
+    m.append(lip, 0.0, 0.368, -0.108, 1, 0);
+    var line = new Mesh();
+    addCylinder(line, 0.036, 0.036, 0.024, 14, lineCol, lineCol, 0, 0, false, false);
+    m.append(line, 0.0, 0.376, -0.108, 1, 0);
+    var lip2 = new Mesh();
+    addCylinder(lip2, 0.042, 0.038, 0.010, 14, bodyL, bodyL, 0, 0, true, true);
+    m.append(lip2, 0.0, 0.402, -0.108, 1, 0);
+
+    // Bail wire, arcing over the spool.
+    for (var b = 0; b < 5; b++) {
+      var ba = -0.5 + b / 4 * 2.6;
+      addBox(m, Math.sin(ba) * 0.044, 0.370 + Math.cos(ba) * 0.044, -0.108,
+        0.011, 0.011, 0.011, metal, 0);
+    }
     return m.build();
   }
 
-  // The reel handle spins independently, so it is its own little mesh.
+  // Rotate a finished mesh about Z in place. Used to aim limb pieces that were
+  // easier to build along +Y.
+  function rotateMeshZ(mesh, a) {
+    var c = Math.cos(a), sn = Math.sin(a), d = mesh.v;
+    for (var i = 0; i < d.length; i += STRIDE) {
+      var x = d[i], y = d[i + 1];
+      d[i] = x * c - y * sn; d[i + 1] = x * sn + y * c;
+      var nx = d[i + 3], ny = d[i + 4];
+      d[i + 3] = nx * c - ny * sn; d[i + 4] = nx * sn + ny * c;
+    }
+  }
+
+  /* A hand gripping a rod. Local +Y is the rod axis, the palm sits on +X and
+     the fingers wrap around the -Z side. Without these the rod is a pole
+     floating in the corner of the screen with nothing holding it.
+
+     opts.armLen / opts.armAngle aim the forearm. The elbow is never modelled,
+     so an arm only looks right if it is long enough to leave the frame: one
+     that stops early leaves a severed stump floating over the water. */
+  function buildHand(opts) {
+    opts = opts || {};
+    var armLen = opts.armLen === undefined ? 0.34 : opts.armLen;
+    var armAng = opts.armAngle === undefined ? Math.PI * 0.92 : opts.armAngle;
+    var m = new Mesh();
+    var skin = [0.66, 0.47, 0.38];
+    var skinD = [0.55, 0.38, 0.30];
+    var skinL = [0.72, 0.53, 0.43];
+    var cuff = opts.sleeve || [0.26, 0.32, 0.35];
+
+    // Palm and the back of the hand. Kept slim — a fist on a 3 cm grip is a
+    // small thing, and an oversized one reads as a wooden block.
+    addBox(m, 0.042, 0.000, 0.000, 0.038, 0.098, 0.072, skin, 0);
+    addBox(m, 0.053, 0.010, 0.000, 0.020, 0.074, 0.062, skinL, 0);
+
+    /* Four fingers, each three segments curling around the front of the grip.
+       Pitch is a hair under the segment thickness so neighbours touch: leave a
+       real gap and at viewmodel range the hand reads as a stack of loose
+       slabs rather than a fist. */
+    for (var i = 0; i < 4; i++) {
+      var y = -0.033 + i * 0.0215;
+      var t = 0.0225 - Math.abs(i - 1.4) * 0.0016;
+      addBox(m, 0.006, y, -0.034, 0.052, t, 0.022, i % 2 ? skin : skinL, 0);
+      addBox(m, -0.024, y, -0.021, 0.024, t * 0.92, 0.030, skinD, 0);
+      addBox(m, 0.030, y, -0.030, 0.017, t * 1.05, 0.019, skinL, 0);
+    }
+
+    // Thumb, laid along the far side.
+    addBox(m, 0.022, -0.038, 0.034, 0.048, 0.022, 0.024, skinL, 0);
+    addBox(m, -0.006, -0.026, 0.038, 0.027, 0.020, 0.022, skin, 0);
+
+    /* Wrist, then a sleeved forearm running back out of frame.
+       Two pieces, not one: a bare wrist that stays slimmer than the palm (a
+       forearm wider than the hand it belongs to reads as a length of pipe),
+       then the shirt, which starts just below the hand so the arm is not one
+       long tube of skin. rotateMeshZ(a) sends (0,t,0) to (-t*sin a, t*cos a),
+       so that is where each piece and the cuff band have to be placed. */
+    var sn = Math.sin(armAng), cs = Math.cos(armAng);
+    var at = function (t) { return [0.052 - t * sn, -0.026 + t * cs, 0.008]; };
+    // Short, so the cuff clears the bottom of the frame and is actually seen.
+    var wristLen = Math.min(0.055, armLen * 0.20);
+    var wrist = new Mesh();
+    addCylinder(wrist, 0.027, 0.034, wristLen + 0.01, 10, skin, skin, 0, 0, false, false);
+    rotateMeshZ(wrist, armAng);
+    var w0 = at(0);
+    m.append(wrist, w0[0], w0[1], w0[2], 1, 0);
+
+    var sleeve = new Mesh();
+    addCylinder(sleeve, 0.040, 0.048, armLen - wristLen, 10, cuff,
+      [cuff[0] * 0.72, cuff[1] * 0.72, cuff[2] * 0.72], 0, 0, true, false);
+    rotateMeshZ(sleeve, armAng);
+    var s0 = at(wristLen);
+    m.append(sleeve, s0[0], s0[1], s0[2], 1, 0);
+
+    // Rolled cuff at the join, slightly proud of the sleeve.
+    var band = new Mesh();
+    addCylinder(band, 0.043, 0.043, 0.022, 10, [cuff[0] * 1.25, cuff[1] * 1.25, cuff[2] * 1.25],
+      [cuff[0] * 1.25, cuff[1] * 1.25, cuff[2] * 1.25], 0, 0, false, false);
+    rotateMeshZ(band, armAng);
+    var b0 = at(wristLen - 0.004);
+    m.append(band, b0[0], b0[1], b0[2], 1, 0);
+
+    return m.build();
+  }
+
+  /* Reel geometry, shared with the rod pose code. The crank axle sits beside
+     the spool; the knob orbits it at CRANK_R. The left hand orbits that same
+     circle, so these have to agree or the hand floats off the handle. */
+  var REEL_SEAT = [0.048, 0.307, -0.108];
+  var CRANK_R = 0.085;
+
+  /* Local-space far end of a forearm built with these options. QA uses it to
+     prove the arm really does leave the frame rather than stopping in mid-air
+     — see the note in buildHand about severed stumps. */
+  function handArmTip(opts) {
+    opts = opts || {};
+    var armLen = opts.armLen === undefined ? 0.34 : opts.armLen;
+    var armAng = opts.armAngle === undefined ? Math.PI * 0.92 : opts.armAngle;
+    return [0.052 - armLen * Math.sin(armAng), -0.026 + armLen * Math.cos(armAng), 0.008];
+  }
+
+  /* The reel crank, which spins independently of the rod.
+     The axle lies across the rod (+X) and the arm radiates along +Y, so a
+     rotation about X sweeps it round. The old arm lay *along* the spin axis,
+     which meant the handle turned without ever appearing to move. */
   function buildReelHandle() {
     var m = new Mesh();
-    addBox(m, 0, 0, 0.055, 0.02, 0.02, 0.11, [0.2, 0.21, 0.24], 0);
-    addCylinder(m, 0.018, 0.018, 0.05, 8, [0.55, 0.4, 0.25], [0.55, 0.4, 0.25], 0, 0, true, true);
+    var metal = [0.20, 0.21, 0.24], knobCol = [0.55, 0.40, 0.25];
+    var axle = new Mesh();
+    addCylinder(axle, 0.010, 0.010, 0.055, 8, metal, metal, 0, 0, true, true);
+    rotateMeshZ(axle, -Math.PI / 2);           // +Y -> +X
+    m.append(axle, 0, 0, 0, 1, 0);
+    addBox(m, 0.055, 0.045, 0, 0.016, 0.090, 0.016, metal, 0);
+    var knob = new Mesh();
+    addCylinder(knob, 0.016, 0.016, 0.045, 10, knobCol, knobCol, 0, 0, true, true);
+    rotateMeshZ(knob, -Math.PI / 2);
+    m.append(knob, 0.050, CRANK_R, 0, 1, 0);
     return m.build();
   }
 
@@ -800,7 +943,11 @@
     boatBeam: boatBeam,
     boatSheer: boatSheer,
     buildRod: buildRod,
+    buildHand: buildHand,
+    handArmTip: handArmTip,
     buildReelHandle: buildReelHandle,
+    CRANK_R: CRANK_R,
+    REEL_SEAT: REEL_SEAT,
     buildBobber: buildBobber,
     buildRing: buildRing,
     makeWaterNormalTexture: makeWaterNormalTexture,

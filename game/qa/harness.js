@@ -90,6 +90,18 @@ const SESSIONS = parseInt(process.argv[2] || '3', 10);
       for (let u = 0; u < 3; u++) if (!finite(s.up[u])) fail(tag + ': camera up not finite');
       if (Math.abs(s.up[1]) < 0.5) fail(tag + ': camera up nearly horizontal (' + s.up[1].toFixed(2) + ')');
 
+      // Commissions must stay in range and never go backwards.
+      const qi = g.state.quest;
+      if (!Number.isInteger(qi) || qi < 0 || qi > DC.Quests.LIST.length) {
+        fail(tag + ': quest index out of range: ' + qi);
+      }
+      if (!Number.isInteger(g.state.questCount) || g.state.questCount < 0) {
+        fail(tag + ': quest progress broke: ' + g.state.questCount);
+      }
+      if ((g.state.questsDone || []).length !== qi) {
+        fail(tag + ': completed count ' + (g.state.questsDone || []).length + ' != index ' + qi);
+      }
+
       // Spots: discovered ids must be real, and homed fish must point at a spot.
       if (g.state.spots) {
         for (const id in g.state.spots) {
@@ -301,6 +313,87 @@ const SESSIONS = parseInt(process.argv[2] || '3', 10);
       if (g.boat.aboard) g.toggleBoat();
     })();
 
+    /* ---- commissions ---------------------------------------------------- */
+    (function questSession() {
+      const Q = DC.Quests;
+      if (!Q || !Q.LIST.length) { fail('quests: none defined'); return; }
+
+      // Every goal must summarise without throwing, and read as English.
+      for (const q of Q.LIST) {
+        if (!q.id || !q.title || !q.text || !q.goal || !q.reward) fail('quest ' + q.id + ': incomplete');
+        let text;
+        try { text = Q.summarise(q.goal); }
+        catch (e) { fail('summarise(' + q.id + ') threw: ' + e.message); continue; }
+        if (!text || text.length < 3) fail('quest ' + q.id + ': empty summary');
+        if (/undefined|NaN|\[object/.test(text)) fail('quest ' + q.id + ': broken summary "' + text + '"');
+        if (q.goal.spot && !g.spots.some(sp => sp.id === q.goal.spot)) {
+          fail('quest ' + q.id + ' names a spot that does not exist: ' + q.goal.spot);
+        }
+        const sps = q.goal.species ? (Array.isArray(q.goal.species) ? q.goal.species : [q.goal.species]) : [];
+        for (const id of sps) if (!DC.Species.byId[id]) fail('quest ' + q.id + ': unknown species ' + id);
+        if (q.reward.unlock && !DC.Species.lureById[q.reward.unlock]) {
+          fail('quest ' + q.id + ': unlock is not a lure');
+        }
+      }
+
+      // A catch that matches nothing must never advance the chain.
+      const startIdx = g.state.quest;
+      const dud = {
+        species: DC.Species.byId['bluegill'], kg: 0.1, grade: 0.1, hour: 12,
+        weather: 'clear', lure: DC.Species.lureById['worm'], spot: null,
+        fromBoat: false, range: 0
+      };
+      for (let i = 0; i < 5; i++) g.checkCommission(dud);
+      if (g.state.quest < startIdx) fail('quests: chain went backwards');
+
+      // Force each commission to complete and check the payout and hand-off.
+      let money = g.state.money;
+      for (let guard = 0; guard < Q.LIST.length + 2; guard++) {
+        const q = g.commission();
+        if (!q) break;
+        const need = q.goal.distinctSpots || q.goal.count || 1;
+        // Build a catch that satisfies whatever this goal asks for.
+        for (let n = 0; n < need + 1; n++) {
+          // Pick a species that satisfies whatever the goal actually asks for:
+          // a named one, or failing that one of the required rarity.
+          let spec;
+          if (q.goal.species) {
+            spec = DC.Species.byId[Array.isArray(q.goal.species) ? q.goal.species[0] : q.goal.species];
+          } else if (q.goal.rarity !== undefined) {
+            spec = DC.Species.SPECIES.find(s2 => s2.rarity >= q.goal.rarity);
+            if (!spec) { fail('quest ' + q.id + ': no species meets rarity ' + q.goal.rarity); break; }
+          } else {
+            spec = DC.Species.byId['largemouth'];
+          }
+          const spotId = q.goal.spot || (q.goal.anySpot || q.goal.distinctSpots
+            ? g.spots.filter(s2 => s2.id !== q.goal.excludeSpot)[n % (g.spots.length - 1)].id
+            : null);
+          const c = {
+            species: spec,
+            kg: Math.max(q.goal.minKg || 0, spec.kg[1]) ,
+            grade: 1, hour: q.goal.hours ? (q.goal.hours[0] + 0.5) % 24 : 12,
+            weather: q.goal.weather ? (Array.isArray(q.goal.weather) ? q.goal.weather[0] : q.goal.weather) : 'clear',
+            lure: DC.Species.lureById[q.goal.lure || 'worm'],
+            spot: spotId ? g.spots.find(s2 => s2.id === spotId) : null,
+            fromBoat: true, range: 200
+          };
+          const res = g.checkCommission(c);
+          if (res && res.completed) {
+            if (g.state.money <= money) fail('quest ' + q.id + ': completing it paid nothing');
+            money = g.state.money;
+            break;
+          }
+          if (n === need) fail('quest ' + q.id + ' did not complete after ' + (need + 1) + ' qualifying catches');
+        }
+        check('quest-' + q.id);
+      }
+      if (g.commission() !== null) fail('quests: chain did not run to the end');
+
+      try { g.ui.renderQuests(); } catch (e) { fail('renderQuests threw: ' + e.message); }
+      // Put the chain back to the start so later sections see a normal state.
+      g.state.quest = 0; g.state.questCount = 0; g.state.questsDone = []; g.state.questSpots = [];
+    })();
+
     /* ---- hostile edge cases -------------------------------------------- */
     // Reel in mid-fight (used to strand the hooked fish).
     (function () {
@@ -376,7 +469,8 @@ const SESSIONS = parseInt(process.argv[2] || '3', 10);
     return {
       fails, stats, maxCast, maxParticles, maxRipples, maxFishDrawn, boatRange, boatDeepest,
       spotCount: (g.spots || []).length,
-      spotsLogged: Object.keys(g.state.spots || {}).length
+      spotsLogged: Object.keys(g.state.spots || {}).length,
+      questCount: DC.Quests.LIST.length
     };
   }, SESSIONS);
 
@@ -397,6 +491,7 @@ const SESSIONS = parseInt(process.argv[2] || '3', 10);
   console.log('boat range    ' + report.boatRange.toFixed(0) + ' m from the dock');
   console.log('boat depth    ' + report.boatDeepest.toFixed(1) + ' m deepest water reached');
   console.log('spots         ' + report.spotCount + ' found, ' + report.spotsLogged + ' logged');
+  console.log('commissions   ' + report.questCount + ' in the chain, all verified completable');
   console.log('');
 
   const allFails = fails.concat(errors);

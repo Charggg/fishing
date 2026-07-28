@@ -32,7 +32,7 @@
       <div><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> walk &nbsp;·&nbsp; <kbd>Shift</kbd> run &nbsp;·&nbsp; <kbd>Mouse</kbd> look</div>
       <div><kbd>Hold&nbsp;LMB</kbd> charge a cast, release to throw</div>
       <div><kbd>Click</kbd> the instant a fish takes it &nbsp;·&nbsp; <kbd>Hold&nbsp;LMB</kbd> to reel</div>
-      <div><kbd>E</kbd> board the rowboat &nbsp;·&nbsp; <kbd>Q</kbd> drop anchor</div>
+      <div><kbd>E</kbd> board the rowboat &nbsp;·&nbsp; <kbd>Q</kbd> drop anchor &nbsp;·&nbsp; <kbd>M</kbd> chart</div>
       <div><kbd>Tab</kbd> journal &nbsp;·&nbsp; <kbd>B</kbd> shop &nbsp;·&nbsp; <kbd>H</kbd> help &nbsp;·&nbsp; <kbd>Esc</kbd> pause</div>
     </div>
     <div class="start-note">Click the window to capture the mouse. Sound is generated live — headphones recommended.</div>
@@ -65,6 +65,12 @@
     <div class="rig-row" id="rig-dist-row"><span>Cast</span><b id="rig-dist">—</b></div>
     <div class="rig-row hidden" id="rig-boat-row"><span>Boat</span><b id="rig-boat">—</b></div>
     <div class="rig-row hidden" id="rig-spot-row"><span>Spot</span><b id="rig-spot">—</b></div>
+  </div>
+
+  <div id="commission" class="hidden">
+    <div class="cm-head"><span class="cm-icon">📋</span><b id="cm-title">—</b><i id="cm-count"></i></div>
+    <div class="cm-goal" id="cm-goal">—</div>
+    <div class="cm-bar"><div class="cm-bar-fill" id="cm-bar"></div></div>
   </div>
 
   <div id="cast-meter" class="hidden">
@@ -143,6 +149,18 @@
   </div>
 </div>
 
+<!-- =========================== COMMISSIONS ========================== -->
+<div id="quests" class="overlay panel hidden">
+  <div class="panel-box">
+    <div class="panel-head">
+      <h2>📋 &nbsp;Commissions</h2>
+      <div class="q-count" id="q-count">0 / 12</div>
+      <button class="x" data-close="quests">✕</button>
+    </div>
+    <div class="q-body" id="q-body"></div>
+  </div>
+</div>
+
 <!-- ============================== CHART ============================= -->
 <div id="map" class="overlay panel hidden">
   <div class="panel-box map-box">
@@ -175,6 +193,14 @@
       <p>The <b>tension</b> bar is the only thing that can kill you. Pinned in the red for about half a second and the line parts.
          When a fish is <i>running</i>, stop reeling. When it is <i>giving</i>, wind like mad.
          <b>Drag</b> (mouse wheel) trades speed for safety: high drag gains line faster but loads the rod harder.</p>
+      <h3>Commissions</h3>
+      <p>Marguerite runs the tackle shop and she has a list of things she wants
+         caught. Press <kbd>C</kbd> to see the current one — it is also pinned to
+         the left of your screen. They start with "catch anything" and end
+         somewhere considerably harder, and each one is designed to teach you the
+         next system: the chart, the boat, the clock, the weather, the fight.</p>
+      <p>They pay well, and two of them unlock a lure you would otherwise have
+         to buy.</p>
       <h3>Reading the lake</h3>
       <p>There are eight named spots on this lake, and they are real features of
          the bottom, not decoration — the deepest hole, the steepest drop-off, a
@@ -207,6 +233,7 @@
         <div><kbd>1</kbd>…<kbd>7</kbd> pick lure</div><div><kbd>F</kbd> next lure</div>
         <div><kbd>R</kbd> reel in</div><div><kbd>E</kbd> board / leave boat</div>
         <div><kbd>Q</kbd> anchor</div><div><kbd>M</kbd> lake chart</div>
+        <div><kbd>C</kbd> commissions</div>
         <div><kbd>Tab</kbd> journal</div>
         <div><kbd>B</kbd> shop</div><div><kbd>P</kbd> stats</div>
         <div><kbd>H</kbd> this screen</div><div><kbd>Esc</kbd> pause</div>
@@ -261,6 +288,7 @@
 <script src="src/shaders.js"></script>
 <script src="src/assets.js"></script>
 <script src="src/species.js"></script>
+<script src="src/quests.js"></script>
 <script src="src/world.js"></script>
 <script src="src/entities.js"></script>
 <script src="src/audio.js"></script>

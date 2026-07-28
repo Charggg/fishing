@@ -140,7 +140,11 @@
       seenTutorial: false,
       boat: null,          // {x, z, heading, anchored, aboard}
       boatSeen: false,
-      spots: {}            // id -> true once you have fished it
+      spots: {},           // id -> true once you have fished it
+      quest: 0,            // index into DC.Quests.LIST
+      questCount: 0,       // qualifying catches toward the current one
+      questSpots: [],      // distinct spot ids counted, for "three spots" goals
+      questsDone: []
     };
   };
 
@@ -383,6 +387,7 @@
       return;
     }
     if (k === 'm') { this.ui.toggleMap(); return; }
+    if (k === 'c') { this.ui.toggleQuests(); return; }
     if (k === 'p') { this.ui.toggleStats(); return; }
   };
 
@@ -502,6 +507,16 @@
     f.state = 'hooked';
     f.visible = false;
     this.fight.begin(f, Math.max(dist, 2.2), ang);
+    // Snapshot the conditions now: by the time it is landed the lure is out of
+    // the water, the clock has moved and the spot lookup has been cleared.
+    this.fight.ctx = {
+      spot: this.currentSpot,
+      fromBoat: this.boat.aboard,
+      range: Math.hypot(_tip[0] - this.dock.endX, _tip[2] - this.dock.endZ),
+      lure: this.lure(),
+      weather: this.weatherName,
+      hour: this.state.hour
+    };
     this.drag = 0.45;
     this.mode = 'fighting';
     this.audio.hookset();
@@ -1473,17 +1488,86 @@
     this.audio.setMood(this.state.hour > 20 || this.state.hour < 5 ? 'night' : 'calm');
     this.flash = 0.35 + sp.rarity * 0.1;
 
+    var fc = this.fight.ctx || {};
     this.lastCatch = {
       species: sp, kg: f.kg, cm: cm, value: value, grade: grade,
       record: isRecord, first: st.caught[sp.id] === 1,
-      day: st.day, hour: st.hour, weather: this.weatherName,
-      lure: this.lure(), level: this.level()
+      day: st.day, hour: fc.hour !== undefined ? fc.hour : st.hour,
+      weather: fc.weather || this.weatherName,
+      lure: fc.lure || this.lure(), level: this.level(),
+      spot: fc.spot || null, fromBoat: !!fc.fromBoat, range: fc.range || 0
     };
+    this.lastCatch.quest = this.checkCommission(this.lastCatch);
     this.ui.hideFight();
     this.ui.showCatch(this.lastCatch);
     this.shoal.respawn(f);
     f.visible = true;
     this.save();
+  };
+
+  /* ====================================================================== */
+  /*  COMMISSIONS                                                           */
+  /* ====================================================================== */
+
+  Game.prototype.commission = function () {
+    var Q = DC.Quests;
+    var i = this.state.quest || 0;
+    return i < Q.LIST.length ? Q.LIST[i] : null;
+  };
+
+  /**
+   * Score a catch against the active commission.
+   * @returns null, {progress, need}, or {completed, reward, next}
+   */
+  Game.prototype.checkCommission = function (c) {
+    var Q = DC.Quests, st = this.state;
+    var q = this.commission();
+    if (!q) return null;
+    if (!Q.matches(q.goal, c)) return null;
+
+    var need = q.goal.count || 1;
+
+    // "Three different spots" counts distinct places, not repeats.
+    if (q.goal.distinctSpots) {
+      if (!st.questSpots) st.questSpots = [];
+      if (!c.spot || st.questSpots.indexOf(c.spot.id) >= 0) {
+        return { progress: st.questSpots.length, need: q.goal.distinctSpots, repeat: true };
+      }
+      st.questSpots.push(c.spot.id);
+      st.questCount = st.questSpots.length;
+      need = q.goal.distinctSpots;
+    } else {
+      st.questCount = (st.questCount || 0) + 1;
+    }
+
+    if (st.questCount < need) {
+      return { progress: st.questCount, need: need };
+    }
+
+    // Completed.
+    st.money += q.reward.money;
+    st.xp += q.reward.xp;
+    if (q.reward.unlock && st.lures.indexOf(q.reward.unlock) < 0) st.lures.push(q.reward.unlock);
+    if (!st.questsDone) st.questsDone = [];
+    st.questsDone.push(q.id);
+    st.quest = (st.quest || 0) + 1;
+    st.questCount = 0;
+    st.questSpots = [];
+    return { completed: true, quest: q, reward: q.reward, next: this.commission() };
+  };
+
+  Game.prototype.commissionStatus = function () {
+    var q = this.commission();
+    if (!q) return null;
+    var need = q.goal.distinctSpots || q.goal.count || 1;
+    return {
+      quest: q,
+      summary: DC.Quests.summarise(q.goal),
+      progress: this.state.questCount || 0,
+      need: need,
+      done: (this.state.questsDone || []).length,
+      total: DC.Quests.LIST.length
+    };
   };
 
   /* ====================================================================== */
@@ -1605,6 +1689,7 @@
       spotFishing: !!this.currentSpot,
       spotsFound: this.state.spots ? Object.keys(this.state.spots).length : 0,
       spotsTotal: (this.spots || []).length,
+      commission: this.commissionStatus(),
       castDist: this.tackle.state !== 'idle'
         ? Math.hypot(this.tackle.x - this.player.x, this.tackle.z - this.player.z) : 0,
       hint: hint,

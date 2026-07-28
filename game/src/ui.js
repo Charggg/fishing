@@ -30,6 +30,8 @@
       'level', 'xp', 'dex', 'lurebar', 'hint', 'rig-rod', 'rig-lure', 'rig-depth',
       'rig-dist', 'rig-boat', 'rig-boat-row', 'rig-spot', 'rig-spot-row', 'spots',
       'map', 'map-canvas', 'map-found', 'map-list', 'map-legend',
+      'commission', 'cm-title', 'cm-count', 'cm-goal', 'cm-bar',
+      'quests', 'q-count', 'q-body',
       'cast-meter', 'cm-fill', 'prompt', 'fight', 'fight-name',
       'fight-phase', 'fb-tension', 'fb-stamina', 'fb-line', 'fb-dist', 'fb-drag',
       'toasts', 'catch', 'catch-banner', 'catch-art', 'catch-name', 'catch-latin',
@@ -213,10 +215,25 @@
     }
     if (d.hint !== last.hint) e.hint.textContent = d.hint;
 
+    var cm = d.commission;
+    if (e['commission']) {
+      e['commission'].classList.toggle('hidden', !cm);
+      if (cm) {
+        var sig = cm.quest.id + '|' + cm.progress + '|' + cm.need;
+        if (sig !== last.cmSig) {
+          e['cm-title'].textContent = cm.quest.title;
+          e['cm-goal'].textContent = cm.summary;
+          e['cm-count'].textContent = cm.need > 1 ? cm.progress + ' / ' + cm.need : '';
+          e['cm-bar'].style.width = (cm.progress / cm.need * 100).toFixed(0) + '%';
+          last.cmSig = sig;
+        }
+      }
+    }
+
     this.lastHUD = {
       money: d.money, level: d.level, xp: d.xp, clock: clock, day: d.day,
       weather: d.weather.label, caught: d.caught, rod: d.rod.name, lure: d.lure.id, hint: d.hint,
-      spotsFound: d.spotsFound
+      spotsFound: d.spotsFound, cmSig: last.cmSig
     };
 
     if (this.statsOpen) {
@@ -483,6 +500,25 @@
       return '<span class="tag" style="color:' + t.c + '">' + t.t + '</span>';
     }).join('');
 
+    // Commission feedback rides on the catch card — it is already the moment
+    // the player is paying attention.
+    var q = c.quest;
+    if (q && q.completed) {
+      e['catch-banner'].textContent = 'COMMISSION COMPLETE';
+      e['catch-banner'].style.background = 'linear-gradient(90deg,#ffc45c,#ff9f43)';
+      tags.unshift({ t: '📋 ' + q.quest.title.toUpperCase(), c: '#ffc45c' });
+      e['catch-tags'].innerHTML = tags.map(function (t) {
+        return '<span class="tag" style="color:' + t.c + '">' + t.t + '</span>';
+      }).join('');
+      e['catch-desc'].textContent = 'Marguerite pays you ' + F.money(q.reward.money) +
+        '.' + (q.next ? ' Next: “' + q.next.title + '”.' : ' That was the last one on her list.');
+    } else if (q && q.progress !== undefined && !q.repeat) {
+      tags.push({ t: '📋 ' + q.progress + ' / ' + q.need, c: '#ffc45c' });
+      e['catch-tags'].innerHTML = tags.map(function (t) {
+        return '<span class="tag" style="color:' + t.c + '">' + t.t + '</span>';
+      }).join('');
+    }
+
     this.drawFishPortrait(sp, c.kg);
     e.catch.classList.remove('hidden');
     if (document.exitPointerLock) document.exitPointerLock();
@@ -531,6 +567,50 @@
     if (this.openPanel === 'help') return this.closePanel();
     this.showPanel('help');
   };
+  UI.prototype.toggleQuests = function () {
+    if (this.openPanel === 'quests') return this.closePanel();
+    this.renderQuests();
+    this.showPanel('quests');
+  };
+
+  UI.prototype.renderQuests = function () {
+    var g = this.game, Q = DC.Quests, st = g.state;
+    var cur = st.quest || 0;
+    var done = st.questsDone || [];
+    this.el['q-count'].textContent = done.length + ' / ' + Q.LIST.length + ' done';
+
+    this.el['q-body'].innerHTML = Q.LIST.map(function (q, i) {
+      var state = i < cur ? 'done' : (i === cur ? 'active' : 'locked');
+      if (state === 'locked') {
+        return '<div class="q-card locked"><div class="q-top">' +
+          '<div class="q-title">???</div>' +
+          '<div class="q-tag" style="color:#93a4b8">LOCKED</div></div>' +
+          '<div class="q-text">Finish the one before it.</div></div>';
+      }
+      var need = q.goal.distinctSpots || q.goal.count || 1;
+      var prog = (state === 'active') ? (st.questCount || 0) : need;
+      var tag = state === 'done'
+        ? '<div class="q-tag" style="color:#5fd08a">DONE</div>'
+        : '<div class="q-tag" style="color:#ffc45c">' +
+          (need > 1 ? prog + ' / ' + need : 'ACTIVE') + '</div>';
+      return '<div class="q-card ' + state + '"><div class="q-top">' +
+        '<div><div class="q-title">' + q.title + '</div>' +
+        '<div class="q-from">' + q.from + '</div></div>' + tag + '</div>' +
+        '<div class="q-text">“' + q.text + '”</div>' +
+        '<div class="q-goal">▸ ' + Q.summarise(q.goal) + '</div>' +
+        '<div class="q-reward">Pays <b>' + F.money(q.reward.money) + '</b> and <i>' +
+        q.reward.xp + ' xp</i>' +
+        (q.reward.unlock ? ' · unlocks the <i>' + Sp.lureById[q.reward.unlock].name + '</i>' : '') +
+        '</div></div>';
+    }).join('');
+
+    // Open on the one they are actually working on, not the history.
+    var active = this.el['q-body'].querySelector('.q-card.active');
+    if (active) {
+      this.el['q-body'].scrollTop = Math.max(0, active.offsetTop - 14);
+    }
+  };
+
   UI.prototype.toggleMap = function () {
     if (this.openPanel === 'map') return this.closePanel();
     this.renderMap();

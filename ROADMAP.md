@@ -16,6 +16,8 @@ QA harness clean. It is not yet *massive* or *addictive* — that is the job.
 | QA harness | `node game/qa/harness.js 3` | 60k+ simulated frames, invariant assertions, edge cases. Exits non-zero on failure. |
 | Render smoke | `node game/qa/render-smoke.js` | Real boot, real clicks, all quality presets, save/reload, resize. Catches GL and DOM errors the sim harness can't. |
 | Screenshots | `node game/qa/shots.js` | Eyes on it. Software rendering, so ignore the FPS numbers. |
+| Spot balance | `node game/qa/spotbias.js` | Fishes every spot and tallies the species. A tuning instrument, not a gate. |
+| Quest chain | `node game/qa/questplay.js` | A bot that reads the chart and plays the commission chain. Proves it is completable. |
 
 **Rule:** never leave the tree with a failing harness. Run both before saying done.
 
@@ -106,9 +108,12 @@ Ordered by how much each one changes the experience, not by how hard it is.
    sunken hump, a weed flat, a mid-depth shelf, the densest reed bay, the
    sharpest point of land, and the dock. Each biases both what spawns there and
    what bites. `M` opens a bathymetric chart drawn from the same heightmap.
-3. **Goals that pull you forward.** Right now nothing asks anything of you.
-   Add a chain of commissions from a local shop owner ("bring me a 2 kg+
-   walleye caught after midnight"), each unlocking the next tier of gear.
+3. **✅ Goals that pull you forward.** *(done 2026-07-28)* Twelve commissions
+   from Marguerite, who runs the tackle shop. Each names a fish and a condition,
+   and between them they teach every system in the order you need it: casting,
+   spots, lures, the boat, the chart, the clock, deep water, the fight, weather,
+   patience, gear, and finally the Moonfin. `C` opens the list; the active one
+   is pinned to the HUD. Two of them unlock a lure.
 4. **Sonar / fish finder.** A purchasable item that draws a depth-and-fish
    readout for the water in front of you. Turns blind casting into reading
    water. Pairs with the boat.
@@ -183,6 +188,25 @@ Ordered by how much each one changes the experience, not by how hard it is.
   now shown in the shop), fixed the ripple pool eviction, deleted two pieces
   of dead code, and fixed the centred-HUD CSS bug above.
 
+### 2026-07-28 — Session 4 (autonomous)
+- **Shipped the commission chain.** Twelve asks in `src/quests.js`, each a set
+  of optional predicates (species, rarity, weight, size grade, spot, hour
+  window, weather, lure, from-the-boat, range from the dock, count, distinct
+  spots) so adding a condition is one line rather than a new goal type. The
+  conditions are snapshotted at the hookup, not at the landing, because by
+  then the lure is out of the water and the clock has moved.
+- HUD banner, `C` panel that opens scrolled to the active one, and completion
+  folded into the catch card — the moment the player is already looking.
+- `qa/questplay.js`: a bot that picks the lure each species likes best, the
+  hour it is most active, and the spot whose bias favours it, then plays the
+  chain. It clears 10 of 12; the last two (a 20 kg sturgeon, the Moonfin) are
+  deliberate endgame asks. Notably it *stalled* at "a walleye after dark"
+  until I taught it to consult the chart — which is exactly the intended
+  puzzle, and good evidence the chart is load-bearing rather than decorative.
+- Harness now verifies every goal summarises to readable English, names real
+  species and spots, that a non-matching catch never advances the chain, and
+  that all twelve complete and pay out.
+
 ### 2026-07-28 — Session 1
 - Built the game: renderer, world, fish AI, fight sim, audio, UI, saves.
 
@@ -192,17 +216,23 @@ Ordered by how much each one changes the experience, not by how hard it is.
 
 Two things, in this order.
 
-**Tier 1 item 3 — goals that pull you forward.** The lake now has places
-worth going and gear worth buying, but nothing *asks* anything of you. A chain
-of commissions ("a 2 kg+ walleye, caught after midnight") that name a spot, a
-species and a condition would tie the chart, the boat, the clock and the
-tackle together into one thread. This is the last structural gap before the
-game is genuinely hard to put down.
+**Tier 1 is done.** The lake has places worth going, gear worth buying, and a
+thread that asks something of you. The remaining structural item is **sonar**
+(Tier 1 item 4): a purchasable fish finder that draws depth and returns for
+the water in front of the boat. It would turn reading water from a lookup in
+a menu into an active skill, and it pairs directly with the boat and chart.
 
-After that, the highest-value remaining items are the **fight camera** (the
-drama is currently entirely in a HUD bar — let the player see the fish) and
-**sonar**, which would make reading water an active skill rather than a
-lookup.
+After that the highest-value work is presentation, not systems:
+- **The fight camera.** All the drama of a fight is currently in a HUD bar.
+  Pull the camera back and orbit on a hookup so the player can *see* the fish.
+  This is the single biggest gap between how the game plays and how it feels.
+- **A landing sequence** — net, lift, hero shot — before the catch card.
+- **Shadows.** The scene reads flat without contact shadows under the trees,
+  the dock and the boat.
+
+Open balance question worth a look: crappie are over-represented at nearly
+every spot (common, wide depth band, listed in several biases). Narrowing
+their band is a one-line experiment; run `spotbias.js` before and after.
 
 ---
 

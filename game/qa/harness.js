@@ -38,7 +38,14 @@ const SESSIONS = parseInt(process.argv[2] || '3', 10);
     const stats = { casts: 0, bites: 0, landed: 0, snapped: 0, thrown: 0, timeouts: 0, frames: 0 };
     let maxCast = 0, maxParticles = 0, maxRipples = 0, maxFishDrawn = 0, trackDeepest = 0;
 
-    function fail(msg) { if (fails.length < 60) fails.push(msg); }
+    const seenFail = Object.create(null);
+    function fail(msg) {
+      // Collapse repeats: a stuck frame otherwise emits the same line 2000 times.
+      const key = msg.replace(/[-0-9.]+/g, '#');
+      if (seenFail[key]) { seenFail[key]++; return; }
+      seenFail[key] = 1;
+      if (fails.length < 40) fails.push(msg);
+    }
     function finite(v) { return typeof v === 'number' && isFinite(v); }
 
     /* ---- invariants checked every simulated frame ---------------------- */
@@ -82,6 +89,13 @@ const SESSIONS = parseInt(process.argv[2] || '3', 10);
       if (b.aboard && Math.hypot(s.camPos[0] - b.x, s.camPos[2] - b.z) > 3) fail(tag + ': camera drifted off the boat');
       for (let u = 0; u < 3; u++) if (!finite(s.up[u])) fail(tag + ': camera up not finite');
       if (Math.abs(s.up[1]) < 0.5) fail(tag + ': camera up nearly horizontal (' + s.up[1].toFixed(2) + ')');
+
+      // Spots: discovered ids must be real, and homed fish must point at a spot.
+      if (g.state.spots) {
+        for (const id in g.state.spots) {
+          if (!g.spots.some(sp => sp.id === id)) fail(tag + ': unknown spot id in save: ' + id);
+        }
+      }
 
       if (g.particles.n > g.particles.max) fail(tag + ': particle pool overflow');
       if (g.ripples.n > g.ripples.max) fail(tag + ': ripple pool overflow');
@@ -230,6 +244,63 @@ const SESSIONS = parseInt(process.argv[2] || '3', 10);
       }
     })();
 
+    /* ---- spots and the chart -------------------------------------------- */
+    (function spotSession() {
+      if (!g.spots || !g.spots.length) { fail('spots: none were found on the lake'); return; }
+      if (g.spots.length < 6) fail('spots: only ' + g.spots.length + ' found, expected 8');
+
+      // Every spot must sit in fishable water, inside the lake, and be distinct.
+      for (let i = 0; i < g.spots.length; i++) {
+        const sp = g.spots[i];
+        if (!finite(sp.x) || !finite(sp.z) || !finite(sp.depth)) fail('spot ' + sp.id + ': not finite');
+        if (g.world.depthAt(sp.x, sp.z) < 0.6) fail('spot ' + sp.id + ' is on dry land');
+        if (Math.hypot(sp.x, sp.z) > 180) fail('spot ' + sp.id + ' is outside the lake');
+        if (!sp.bias || !sp.name || !sp.hint) fail('spot ' + sp.id + ': missing metadata');
+        for (const other of g.spots) {
+          if (other === sp) continue;
+          if (Math.hypot(other.x - sp.x, other.z - sp.z) < 12) {
+            fail('spots ' + sp.id + ' and ' + other.id + ' are on top of each other');
+          }
+        }
+      }
+
+      // Every homed fish must reference a spot that exists.
+      for (const f of g.shoal.fish) {
+        if (f.home && !g.spots.some(sp => sp === f.home)) fail('fish homed to an unknown spot');
+      }
+
+      // Discover them all the honest way, by putting a lure on each.
+      const before = Object.keys(g.state.spots || {}).length;
+      for (const sp of g.spots) {
+        g.tackle.state = 'water'; g.tackle.active = true;
+        g.tackle.x = sp.x; g.tackle.z = sp.z;
+        g.tackle.lureX = sp.x; g.tackle.lureZ = sp.z;
+        g.trackSpot();
+        if (!g.state.spots[sp.id]) fail('spot ' + sp.id + ' did not log when fished');
+      }
+      g.tackle.state = 'idle'; g.tackle.active = false;
+      if (g.discoveredSpots().length !== g.spots.length) fail('discoveredSpots() disagrees with the save');
+      if (Object.keys(g.state.spots).length < before) fail('discovering spots lost earlier ones');
+
+      // The chart must render, twice (the terrain layer is cached on first use).
+      try { g.ui.renderMap(); g.ui.renderMap(); }
+      catch (e) { fail('renderMap threw: ' + e.message); }
+
+      // Fish each spot briefly and confirm bites still happen out there.
+      for (const sp of g.spots) {
+        if (g.boat.aboard) g.toggleBoat();
+        g.boat.x = sp.x; g.boat.z = sp.z; g.boat.anchored = true;
+        g.player.x = sp.x; g.player.z = sp.z;
+        g.boat.aboard = true;
+        // Settle the camera before casting — doCast reads the rod transform,
+        // which is derived from the camera, which updatePlayer owns.
+        step(4, 'spot-settle');
+        g.state.lure = LURES[(rng() * LURES.length) | 0];
+        attempt(rng, 'spot-' + sp.id);
+      }
+      if (g.boat.aboard) g.toggleBoat();
+    })();
+
     /* ---- hostile edge cases -------------------------------------------- */
     // Reel in mid-fight (used to strand the hooked fish).
     (function () {
@@ -302,7 +373,11 @@ const SESSIONS = parseInt(process.argv[2] || '3', 10);
     let boatRange = 0, boatDeepest = 0;
     boatRange = Math.hypot(g.boat.x - g.dock.endX, g.boat.z - g.dock.endZ);
     boatDeepest = trackDeepest;
-    return { fails, stats, maxCast, maxParticles, maxRipples, maxFishDrawn, boatRange, boatDeepest };
+    return {
+      fails, stats, maxCast, maxParticles, maxRipples, maxFishDrawn, boatRange, boatDeepest,
+      spotCount: (g.spots || []).length,
+      spotsLogged: Object.keys(g.state.spots || {}).length
+    };
   }, SESSIONS);
 
   const { fails, stats, maxCast, maxParticles, maxRipples, maxFishDrawn } = report;
@@ -321,6 +396,7 @@ const SESSIONS = parseInt(process.argv[2] || '3', 10);
   console.log('fish drawn    ' + maxFishDrawn);
   console.log('boat range    ' + report.boatRange.toFixed(0) + ' m from the dock');
   console.log('boat depth    ' + report.boatDeepest.toFixed(1) + ' m deepest water reached');
+  console.log('spots         ' + report.spotCount + ' found, ' + report.spotsLogged + ' logged');
   console.log('');
 
   const allFails = fails.concat(errors);

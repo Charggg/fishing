@@ -461,3 +461,40 @@ kbd {
   .catch-desc { padding: 0 18px; }
   .keygrid { grid-template-columns: 1fr; }
 }
+
+/* ------------------------------------------------------------- the chart */
+.map-box { width: min(860px, 96vw); }
+.map-found { font-size: 13px; color: var(--accent); font-weight: 600; }
+.map-wrap {
+  position: relative; padding: 14px 20px 6px;
+  display: flex; justify-content: center;
+}
+#map-canvas {
+  display: block;
+  width: auto; height: min(56vh, 660px);
+  max-width: 100%; aspect-ratio: 1 / 1;
+  border-radius: 12px; border: 1px solid var(--line);
+  background: #0a1420;
+  box-shadow: inset 0 0 40px rgba(0, 0, 0, 0.5);
+}
+.map-legend {
+  display: flex; gap: 14px; align-items: center; justify-content: center;
+  font-size: 10px; letter-spacing: 0.1em; color: #8fa6ba;
+  padding: 8px 20px 2px;
+}
+.map-legend i { font-style: normal; display: flex; align-items: center; gap: 4px; }
+.map-legend .sw { width: 14px; height: 8px; border-radius: 2px; display: inline-block; }
+.map-list {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 8px; padding: 10px 20px 18px; overflow-y: auto; flex: 1; min-height: 0;
+}
+.map-card {
+  padding: 9px 12px; border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04); border: 1px solid var(--line);
+}
+.map-card.locked { opacity: 0.4; }
+.map-card .mc-top { display: flex; align-items: baseline; gap: 7px; }
+.map-card .mc-name { font-size: 13px; font-weight: 650; }
+.map-card .mc-depth { font-size: 10.5px; color: var(--dim); margin-left: auto; font-family: var(--mono); }
+.map-card .mc-hint { font-size: 11px; color: var(--dim); margin-top: 4px; line-height: 1.45; }
+#chip-spots b { color: #8fd0dd; }

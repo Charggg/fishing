@@ -37,6 +37,11 @@ QA harness clean. It is not yet *massive* or *addictive* — that is the job.
       the newest ripple instead of the oldest. Should be a proper ring buffer.
 - [ ] Fish are hard to see under the surface at any distance. Contrast is
       physically honest and gameplay-hostile.
+- [ ] Crappie are over-represented at every spot. Common + a wide depth band
+      + listed in several biases. Consider narrowing their band.
+- [ ] `doCast` reads the rod transform, which is derived from the camera, which
+      `updatePlayer` owns. Anything that moves the player has to settle a frame
+      first. Board/exit now do this explicitly; a future fast-travel must too.
 - [ ] The reflection pass draws a fraction of prop instances on medium quality
       (`reflFrac`), which is a fixed prefix of the array, so the same trees are
       always missing. Should be a spatial choice, not an array slice.
@@ -67,6 +72,16 @@ QA harness clean. It is not yet *massive* or *addictive* — that is the job.
 - [x] **2026-07-28** An unattended boat drifted on the wind indefinitely and
       could strand itself mid-lake, unreachable. It now holds station unless
       someone is aboard with the anchor up.
+- [x] **2026-07-28 (significant)** The bite roll matched species against the
+      *water depth under the lure* instead of the depth the lure was fishing
+      at. In shallow water the two are similar, so it never showed — but in the
+      30 m deep hole every species scored ~1e-7 and the marquee location of the
+      whole game was completely dead. Found only because the boat made deep
+      water reachable. 0/14 casts before, 11/14 after.
+- [x] **2026-07-28** Species selection used `max(appeal × random)`, which is so
+      noisy that appeal barely mattered and whatever species was commonest
+      nearby usually won. Replaced with weighted reservoir sampling (A-Res),
+      which picks in true proportion to appeal.
 
 ---
 
@@ -80,10 +95,11 @@ Ordered by how much each one changes the experience, not by how hard it is.
    depth/species system is built around — sat 40–70 m out, at the ragged edge
    of casting range. A boat makes the entire lake playable and turns "where you
    cast" from a claim in the README into an actual decision.
-2. **Named fishing spots + a map.** Give the lake a geography players can talk
-   about: The Deep Hole, Reed Bay, The Drop-Off, Sunken Timber, The Narrows.
-   Each with its own species bias. A pull-up map (`M`) showing depth contours,
-   your position, and spots you've discovered.
+2. **✅ Named fishing spots + a chart.** *(done 2026-07-28)* Eight spots found
+   by reading the generated heightmap — deepest hole, steepest drop-off, a
+   sunken hump, a weed flat, a mid-depth shelf, the densest reed bay, the
+   sharpest point of land, and the dock. Each biases both what spawns there and
+   what bites. `M` opens a bathymetric chart drawn from the same heightmap.
 3. **Goals that pull you forward.** Right now nothing asks anything of you.
    Add a chain of commissions from a local shop owner ("bring me a 2 kg+
    walleye caught after midnight"), each unlocking the next tier of gear.
@@ -140,6 +156,22 @@ Ordered by how much each one changes the experience, not by how hard it is.
   animation and audio, boat wake ripples, and fish that spook from a boat
   moving fast overhead. The whole lake is now fishable.
 
+### 2026-07-28 — Session 3 (autonomous)
+- **Shipped named spots + the lake chart.** Eight spots derived from the
+  heightmap at load (13 ms), each with a species bias, a description and a
+  hint. Fishing one logs it, pays XP, and adds it to the chart. `M` opens a
+  bathymetric chart: contours every 4 m straight from the heightmap,
+  hillshaded land, the dock, the boat with heading and anchor state, your
+  position and view cone, the lure, a scale bar and a north arrow.
+- **Made spots actually hold their fish.** Two thirds of the shoal now spawns
+  on structure with a species chosen by that spot's bias, and homes to it
+  rather than wandering off. Measured result: average catch weight runs
+  0.22 kg at the dock to 2.72 kg at Heron Point, and sturgeon and moonfin
+  appear only in the deep hole.
+- Fixed the deep-water bite bug and the species-selection noise (see above).
+- Added `qa/spotbias.js`, a balance probe that fishes each spot and tallies
+  what it produced. Not a pass/fail gate — a tuning instrument.
+
 ### 2026-07-28 — Session 1
 - Built the game: renderer, world, fish AI, fight sim, audio, UI, saves.
 
@@ -147,17 +179,20 @@ Ordered by how much each one changes the experience, not by how hard it is.
 
 ## Next session: start here
 
-Tier 1 item 2 — **named fishing spots and a map**. The boat made the lake
-traversable; now it needs a geography worth traversing. Concretely:
-- Pick 6–8 spots from the heightmap (deepest point, steepest drop-off, the
-  weed flat, the reed bays, the inflow) and name them.
-- Species bias per spot, layered on top of the existing depth model.
-- `M` opens a chart: depth contours from the heightmap, your boat, the dock,
-  and spots you have discovered by fishing within ~25 m of them.
-- Discovering a spot is worth XP and a journal entry.
+Two things, in this order.
 
-That closes the loop the boat opened: somewhere to go, a reason to go there,
-and a record of where you have been.
+**1. A debt sweep.** Several small items in section 1 are quick and one of
+them (fish visibility) is a genuine gameplay problem: you cannot see the fish
+you are trying to catch. Also wire `lure.noise` into spooking so the field
+means something, make `Ripples` a real ring buffer, and delete the dead
+`propDist` config and `retrieving` tackle state.
+
+**2. Tier 1 item 3 — goals that pull you forward.** The lake now has places
+worth going and gear worth buying, but nothing *asks* anything of you. A chain
+of commissions ("a 2 kg+ walleye, caught after midnight") that name a spot, a
+species and a condition would tie the chart, the boat, the clock and the
+tackle together into one thread. This is the last structural gap before the
+game is genuinely hard to put down.
 
 ---
 

@@ -176,8 +176,9 @@
     this.visible = true;
   }
 
-  function Shoal(world, count, seed) {
+  function Shoal(world, count, seed, spots) {
     this.world = world;
+    this.spots = spots || [];
     this.rng = M.mulberry32((seed ^ 0x51ed270b) >>> 0);
     this.fish = [];
     this.count = count;
@@ -196,25 +197,48 @@
     this.drawn = 0;
   }
 
-  // Place a fish somewhere plausible and give it a species that suits the depth.
+  /* Place a fish, then choose a species that suits where it landed.
+     Most of the shoal lives on structure — that is what makes a named spot
+     actually hold its signature fish rather than just re-weighting a roll. */
   Shoal.prototype.respawn = function (f, initial) {
     var rng = this.rng, w = this.world;
-    var x, z, depth, tries = 0;
-    do {
-      var ang = rng() * M.TAU;
-      var r = Math.pow(rng(), 0.55) * 150;
-      x = Math.cos(ang) * r; z = Math.sin(ang) * r;
-      depth = w.depthAt(x, z);
-      tries++;
-    } while (depth < 0.7 && tries < 24);
+    var x, z, depth, tries = 0, spot = null;
+
+    if (this.spots.length && rng() < 0.66) {
+      spot = this.spots[(rng() * this.spots.length) | 0];
+      for (tries = 0; tries < 20; tries++) {
+        var sa = rng() * M.TAU, sr = Math.sqrt(rng()) * spot.radius;
+        x = spot.x + Math.cos(sa) * sr;
+        z = spot.z + Math.sin(sa) * sr;
+        depth = w.depthAt(x, z);
+        if (depth >= 0.7) break;
+      }
+      if (depth < 0.7) spot = null;
+    }
+    if (!spot) {
+      tries = 0;
+      do {
+        var ang = rng() * M.TAU;
+        var r = Math.pow(rng(), 0.55) * 150;
+        x = Math.cos(ang) * r; z = Math.sin(ang) * r;
+        depth = w.depthAt(x, z);
+        tries++;
+      } while (depth < 0.7 && tries < 24);
+    }
 
     var candidates = Sp.SPECIES;
     var sp = M.pickWeighted(rng, candidates, function (s) {
       var band = 1;
       if (depth < s.depth[0]) band = Math.exp(-Math.pow((s.depth[0] - depth) / 2.2, 2));
       else if (depth > s.depth[1] * 1.4) band = 0.25;
-      return band / (1 + s.rarity * 2.2);
+      var struct = 1;
+      if (spot && spot.bias) {
+        var b = spot.bias[s.id];
+        struct = (b === undefined ? 0.35 : b);
+      }
+      return band * struct / (1 + s.rarity * 2.2);
     });
+    f.home = spot;                      // fish hold on structure, they do not wander off it
     f.sp = sp;
     f.kg = Sp.rollWeight(sp, rng, 0.25);
     f.len = Sp.lengthFor(sp, f.kg) / 100;  // metres
@@ -236,11 +260,27 @@
 
   Shoal.prototype.pickTarget = function (f) {
     var rng = this.rng, w = this.world;
+    var home = f.home;
     for (var i = 0; i < 10; i++) {
       var ang = rng() * M.TAU;
       var dist = M.randRange(rng, 4, 26);
-      var tx = f.x + Math.cos(ang) * dist;
-      var tz = f.z + Math.sin(ang) * dist;
+      var tx, tz;
+      if (home) {
+        // Roam within the structure it lives on; if it has strayed, head back.
+        var away = Math.hypot(f.x - home.x, f.z - home.z);
+        if (away > home.radius * 1.15) {
+          var back = home.radius * 0.55;
+          tx = home.x + Math.cos(ang) * back * rng();
+          tz = home.z + Math.sin(ang) * back * rng();
+        } else {
+          var hr = Math.sqrt(rng()) * home.radius;
+          tx = home.x + Math.cos(ang) * hr;
+          tz = home.z + Math.sin(ang) * hr;
+        }
+      } else {
+        tx = f.x + Math.cos(ang) * dist;
+        tz = f.z + Math.sin(ang) * dist;
+      }
       var depth = w.depthAt(tx, tz);
       if (depth < 0.6) continue;
       if (Math.hypot(tx, tz) > 165) continue;

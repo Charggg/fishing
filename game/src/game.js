@@ -139,7 +139,8 @@
       hour: 5.6, day: 1,
       seenTutorial: false,
       boat: null,          // {x, z, heading, anchored, aboard}
-      boatSeen: false
+      boatSeen: false,
+      spots: {}            // id -> true once you have fished it
     };
   };
 
@@ -176,8 +177,14 @@
         self.props = self.world.scatter(self.dock);
         self.buildProps();
       }],
+      ['Sounding the lake', function () {
+        self.spots = self.world.findSpots(self.dock, self.props);
+        // The dock is where you start, so you already know about it.
+        if (!self.state.spots) self.state.spots = {};
+        self.state.spots.dock = true;
+      }],
       ['Stocking the lake', function () {
-        self.shoal = new Ent.Shoal(self.world, 150, self.state.seed);
+        self.shoal = new Ent.Shoal(self.world, 150, self.state.seed, self.spots);
         self.renderer.buildFishBuffers(A.buildFishMesh(22, 12), 170);
         self.renderer.buildRippleBuffers(A.buildRing(44), 48);
       }],
@@ -375,6 +382,7 @@
       if (idx < owned.length) this.selectLure(owned[idx].id);
       return;
     }
+    if (k === 'm') { this.ui.toggleMap(); return; }
     if (k === 'p') { this.ui.toggleStats(); return; }
   };
 
@@ -750,6 +758,9 @@
       if (this.boatDistance() > 3.6) return;
       b.aboard = true;
       this.reelIn();
+      this.updateBoat(0);
+      this.updatePlayer(0);
+      this.updateRod(0);
       this.state.boatSeen = true;
       this.audio.footstep(true);
       this.audio.splash(0.35);
@@ -777,6 +788,8 @@
     p.x = best[0]; p.z = best[1];
     p.y = this.groundAt(p.x, p.z) + 1.62;
     this.reelIn();
+    this.updatePlayer(0);
+    this.updateRod(0);
     this.audio.footstep(this.world.onDock(this.dock, p.x, p.z));
     this.save();
   };
@@ -811,7 +824,7 @@
         b.stroke += dt * (throttle > 0 ? 3.1 : 2.2);
         var pulse = Math.max(0, Math.sin(b.stroke));
         b.strokePower = pulse;
-        var accel = throttle * pulse * 5.4;
+        var accel = throttle * pulse * 7.0;
         var fx = -Math.sin(b.heading), fz = -Math.cos(b.heading);
         b.vx += fx * accel * dt;
         b.vz += fz * accel * dt;
@@ -1183,6 +1196,7 @@
       this.spinnerMove = M.damp(this.spinnerMove, 0, 2.2, dt);
     }
 
+    this.trackSpot();
     if (t.active && (this.mode === 'fishing')) this.rollForBites(dt);
 
     // Engaged-fish state machine.
@@ -1235,6 +1249,39 @@
     }
   };
 
+  /* Which named spot are we fishing? The lure decides when it is in the
+     water; otherwise the boat does, so the HUD can tell you where you are. */
+  Game.prototype.trackSpot = function () {
+    if (!this.spots) return;
+    var t = this.tackle;
+    var x, z, fishing;
+    if (t.active) { x = t.lureX; z = t.lureZ; fishing = true; }
+    else if (this.boat.aboard) { x = this.boat.x; z = this.boat.z; fishing = false; }
+    else { x = this.player.x; z = this.player.z; fishing = false; }
+
+    var spot = this.world.spotAt(this.spots, x, z);
+    this.currentSpot = fishing ? spot : null;
+    this.nearSpot = spot;
+
+    if (spot && fishing && !this.state.spots[spot.id]) {
+      this.state.spots[spot.id] = true;
+      this.state.xp += 60;
+      this.flash = Math.max(this.flash, 0.25);
+      this.audio.fanfare(1);
+      this.ui.showToast(spot.icon + '  ' + spot.name + ' — new spot logged. [M] for the chart.', 'good');
+      this.ui.showToast(spot.hint, 'good');
+      this.save();
+    }
+  };
+
+  Game.prototype.discoveredSpots = function () {
+    var st = this.state, out = [];
+    for (var i = 0; i < (this.spots || []).length; i++) {
+      if (st.spots && st.spots[this.spots[i].id]) out.push(this.spots[i]);
+    }
+    return out;
+  };
+
   Game.prototype.acceptChance = function (f) {
     var lure = this.lure();
     var mul = f.sp.lures[lure.id];
@@ -1256,11 +1303,17 @@
     var ctx = {
       hour: this.state.hour,
       weather: this.weatherName,
-      depth: this.world.depthAt(t.lureX, t.lureZ),
-      lure: lure
+      // The depth the LURE is fishing at, not the depth of water under it.
+      // Using water depth meant a jig in 30 m of water was matched against
+      // every species' band as if it were sitting on the bottom, which made
+      // the deep hole effectively unfishable.
+      depth: -t.lureY,
+      water: this.world.depthAt(t.lureX, t.lureZ),
+      lure: lure,
+      spot: this.currentSpot
     };
     var radius = lure.radius * (1 + this.luck() * 0.35);
-    var best = null, bestW = 0;
+    var best = null, bestW = 0, bestKey = -1;
     var list = this.shoal.fish;
     for (var i = 0; i < list.length; i++) {
       var f = list[i];
@@ -1269,8 +1322,13 @@
       var d2 = dx * dx + dy * dy + dz * dz;
       if (d2 > radius * radius) continue;
       var prox = 1 - Math.sqrt(d2) / radius;
-      var w = Sp.appeal(f.sp, ctx) * (0.3 + prox * prox) * this.rng();
-      if (w > bestW) { bestW = w; best = f; }
+      var w = Sp.appeal(f.sp, ctx) * (0.35 + 0.65 * prox * prox);
+      if (w <= 1e-9) continue;
+      /* Weighted reservoir sampling (A-Res): key = U^(1/w) picks each candidate
+         with probability proportional to w. The old max-of-(w * U) was so noisy
+         that appeal barely mattered and whatever was commonest usually won. */
+      var key = Math.pow(this.rng(), 1 / w);
+      if (key > bestKey) { bestKey = key; best = f; bestW = w; }
     }
     if (!best) return;
     // Scale so a well-matched lure in the right water gets a bite in ~10-25s.
@@ -1520,6 +1578,10 @@
       anchored: this.boat.anchored,
       boatDepth: this.boat.aboard ? this.world.depthAt(this.boat.x, this.boat.z) : 0,
       nearBoat: !this.boat.aboard && this.boatDistance() < 3.6,
+      spot: this.currentSpot || this.nearSpot || null,
+      spotFishing: !!this.currentSpot,
+      spotsFound: this.state.spots ? Object.keys(this.state.spots).length : 0,
+      spotsTotal: (this.spots || []).length,
       castDist: this.tackle.state !== 'idle'
         ? Math.hypot(this.tackle.x - this.player.x, this.tackle.z - this.player.z) : 0,
       hint: hint,

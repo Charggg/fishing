@@ -325,6 +325,208 @@
   };
 
   // Pick a spawn point: the end of the dock, looking down the lake.
+  /* ==================================================================== */
+  /*  FISHING SPOTS                                                       */
+  /*  Found by reading the generated heightmap, not placed by hand — so    */
+  /*  every one of them is a real feature of the lake bed you can see.     */
+  /* ==================================================================== */
+
+  var SPOT_KINDS = {
+    deep: {
+      name: 'The Cauldron', icon: '🕳️',
+      desc: 'The deepest water in the lake. Cold, dark, and where the old fish go to sulk.',
+      hint: 'Deep jigs and glow. Sturgeon, walleye, catfish — and something else after midnight.',
+      bias: { sturgeon: 3.4, moonfin: 3.8, walleye: 2.2, catfish: 2.4, brown: 1.8, crappie: 1.2 }
+    },
+    dropoff: {
+      name: 'The Drop-Off', icon: '📐',
+      desc: 'The bottom falls away here in a few metres. Predators patrol the edge.',
+      hint: 'Work the lip. Smallmouth, walleye and brown trout hunt the break.',
+      bias: { smallmouth: 2.6, walleye: 2.2, brown: 2.0, rainbow: 1.7, crappie: 1.5, pike: 1.3 }
+    },
+    flat: {
+      name: 'The Weed Flat', icon: '🌾',
+      desc: 'A broad shallow shelf, soft-bottomed and thick with growth.',
+      hint: 'Ambush country. Largemouth, pike and pickerel sit in it all day.',
+      bias: { largemouth: 2.8, pike: 2.4, pickerel: 2.4, carp: 2.0, bluegill: 1.8, koi: 1.6 }
+    },
+    hump: {
+      name: 'The Sunken Hump', icon: '⛰️',
+      desc: 'A rise on the bottom with deep water all around it. Classic structure.',
+      hint: 'Bait stacks up over the top. Smallmouth, walleye and the odd musky.',
+      bias: { smallmouth: 2.8, walleye: 2.0, musky: 2.2, perch: 1.8, rainbow: 1.5 }
+    },
+    shelf: {
+      name: 'The Shelf', icon: '🪨',
+      desc: 'A flat bench at mid depth, out of the wind and out of the sun.',
+      hint: 'Steady middling water. Crappie, perch and trout hold here.',
+      bias: { crappie: 2.4, perch: 2.2, rainbow: 1.9, smallmouth: 1.6, brown: 1.4 }
+    },
+    reeds: {
+      name: 'Reed Bay', icon: '🪷',
+      desc: 'Thick cattails in a sheltered corner. Warm, shallow, full of life.',
+      hint: 'Panfish paradise, and the bass that eat them.',
+      bias: { bluegill: 3.0, largemouth: 2.4, pickerel: 2.2, perch: 1.8, koi: 2.0, carp: 1.6 }
+    },
+    point: {
+      name: 'Heron Point', icon: '🪶',
+      desc: 'A finger of land reaching out into the lake, with current curling around the tip.',
+      hint: 'Fish stack on the point. Everything moves past it eventually.',
+      bias: { smallmouth: 2.2, pike: 2.0, musky: 2.0, largemouth: 1.8, walleye: 1.6 }
+    },
+    dock: {
+      name: 'The Old Dock', icon: '🪵',
+      desc: 'Shade, pilings and a century of dropped bait. Where everyone starts.',
+      hint: 'Reliable panfish. Nothing enormous, but always something.',
+      bias: { bluegill: 2.4, crappie: 2.0, perch: 1.9, largemouth: 1.5, carp: 1.4 }
+    }
+  };
+
+  World.prototype.findSpots = function (dock, props) {
+    var self = this;
+    var spots = [];
+
+    function add(kind, x, z, radius) {
+      var k = SPOT_KINDS[kind];
+      spots.push({
+        id: kind, kind: kind, name: k.name, icon: k.icon,
+        desc: k.desc, hint: k.hint, bias: k.bias,
+        x: x, z: z, radius: radius, depth: self.depthAt(x, z)
+      });
+    }
+    // Spots have to be distinct places, not eight labels on one patch of water.
+    function clear(x, z, minSep) {
+      for (var i = 0; i < spots.length; i++) {
+        if (Math.hypot(spots[i].x - x, spots[i].z - z) < minSep) return false;
+      }
+      return true;
+    }
+
+    // --- coarse survey of the lake bed
+    var cells = [];
+    var STEP = 5;
+    for (var x = -168; x <= 168; x += STEP) {
+      for (var z = -168; z <= 168; z += STEP) {
+        var h = this.sample(x, z);
+        if (h > -0.7) continue;
+        var gx = (this.sample(x + 9, z) - this.sample(x - 9, z)) / 18;
+        var gz = (this.sample(x, z + 9) - this.sample(x, z - 9)) / 18;
+        // Relief: how much shallower this is than the ring of water around it.
+        var ring = 0;
+        for (var a = 0; a < 8; a++) {
+          var an = a / 8 * M.TAU;
+          ring += this.sample(x + Math.cos(an) * 16, z + Math.sin(an) * 16);
+        }
+        ring /= 8;
+        cells.push({
+          x: x, z: z, depth: -h, grad: Math.hypot(gx, gz), relief: h - ring
+        });
+      }
+    }
+    if (!cells.length) return spots;
+
+    function best(score) {
+      var top = null, topScore = -1e9;
+      for (var i = 0; i < cells.length; i++) {
+        var v = score(cells[i]);
+        if (v > topScore) { topScore = v; top = cells[i]; }
+      }
+      return topScore > -1e8 ? top : null;
+    }
+
+    // The dock is a known spot from the first second of play.
+    add('dock', dock.endX, dock.endZ, 15);
+
+    // Deepest water anywhere.
+    var c = best(function (q) { return q.depth; });
+    if (c) add('deep', c.x, c.z, 26);
+
+    // Steepest slope at fishable depth, well away from the hole.
+    c = best(function (q) {
+      if (q.depth < 3 || q.depth > 15) return -1e9;
+      if (!clear(q.x, q.z, 46)) return -1e9;
+      return q.grad;
+    });
+    if (c) add('dropoff', c.x, c.z, 20);
+
+    // A rise with deep water around it.
+    c = best(function (q) {
+      if (q.depth < 2.5 || q.depth > 12) return -1e9;
+      if (!clear(q.x, q.z, 42)) return -1e9;
+      return q.relief;
+    });
+    if (c && c.relief > 0.8) add('hump', c.x, c.z, 18);
+
+    // Broad, flat, shallow: the weed flat.
+    c = best(function (q) {
+      if (q.depth < 1.4 || q.depth > 5.0) return -1e9;
+      if (!clear(q.x, q.z, 42)) return -1e9;
+      return -q.grad;
+    });
+    if (c) add('flat', c.x, c.z, 26);
+
+    // Flat bench at middling depth.
+    c = best(function (q) {
+      if (q.depth < 5 || q.depth > 10) return -1e9;
+      if (!clear(q.x, q.z, 42)) return -1e9;
+      return -q.grad;
+    });
+    if (c) add('shelf', c.x, c.z, 22);
+
+    // Reed Bay: the densest cluster of the reeds we actually scattered.
+    if (props && props.reeds && props.reeds.length) {
+      var bestReed = null, bestCount = 0;
+      for (var r = 0; r < props.reeds.length; r += 7) {
+        var rd = props.reeds[r], count = 0;
+        for (var q2 = 0; q2 < props.reeds.length; q2 += 3) {
+          var o = props.reeds[q2];
+          if (Math.hypot(o.x - rd.x, o.z - rd.z) < 22) count++;
+        }
+        if (count > bestCount) { bestCount = count; bestReed = rd; }
+      }
+      if (bestReed) {
+        // Sit the marker a little out from the reeds, in fishable water.
+        var inx = -bestReed.x, inz = -bestReed.z;
+        var il = Math.hypot(inx, inz) || 1;
+        var rx = bestReed.x + inx / il * 10, rz = bestReed.z + inz / il * 10;
+        for (var g = 0; g < 20 && this.depthAt(rx, rz) < 1.0; g++) {
+          rx += inx / il * 3; rz += inz / il * 3;
+        }
+        if (clear(rx, rz, 34)) add('reeds', rx, rz, 20);
+      }
+    }
+
+    // Heron Point: where land pushes furthest into the lake.
+    var minR = 1e9, minAng = 0;
+    for (var t = 0; t < 240; t++) {
+      var ang2 = t / 240 * M.TAU;
+      var cx = Math.cos(ang2), cz = Math.sin(ang2);
+      var rr = 20;
+      while (rr < 200 && this.sample(cx * rr, cz * rr) < 0.35) rr += 1.0;
+      if (rr < minR) { minR = rr; minAng = ang2; }
+    }
+    if (minR < 190) {
+      var px = Math.cos(minAng) * (minR - 13), pz = Math.sin(minAng) * (minR - 13);
+      for (var g2 = 0; g2 < 20 && this.depthAt(px, pz) < 1.2; g2++) {
+        px -= Math.cos(minAng) * 2.5; pz -= Math.sin(minAng) * 2.5;
+      }
+      if (clear(px, pz, 34)) add('point', px, pz, 18);
+    }
+
+    for (var i2 = 0; i2 < spots.length; i2++) spots[i2].depth = this.depthAt(spots[i2].x, spots[i2].z);
+    return spots;
+  };
+
+  World.prototype.spotAt = function (spots, x, z) {
+    var best = null, bestD = 1e9;
+    for (var i = 0; i < spots.length; i++) {
+      var s = spots[i];
+      var d = Math.hypot(s.x - x, s.z - z);
+      if (d < s.radius && d < bestD) { bestD = d; best = s; }
+    }
+    return best;
+  };
+
   World.prototype.spawn = function (dock) {
     return {
       x: dock.x + dock.dirX * (dock.length - 2.0),
@@ -335,5 +537,6 @@
   };
 
   DC.World = World;
+  DC.SPOT_KINDS = SPOT_KINDS;
   DC.WORLD_EXTENT = EXTENT;
 })(DC);

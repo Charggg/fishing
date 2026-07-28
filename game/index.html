@@ -50,6 +50,7 @@
     <div class="hud-chip" id="chip-money"><span class="ic">💵</span><b id="money">$150</b></div>
     <div class="hud-chip" id="chip-level"><span class="ic">⭐</span><b id="level">Lv 1</b><i id="xp">0 xp</i></div>
     <div class="hud-chip" id="chip-dex"><span class="ic">📖</span><b id="dex">0/16</b></div>
+    <div class="hud-chip" id="chip-spots"><span class="ic">🗺️</span><b id="spots">0/8</b></div>
   </div>
 
   <div class="hud-bottom">
@@ -63,6 +64,7 @@
     <div class="rig-row" id="rig-depth-row"><span>Water</span><b id="rig-depth">—</b></div>
     <div class="rig-row" id="rig-dist-row"><span>Cast</span><b id="rig-dist">—</b></div>
     <div class="rig-row hidden" id="rig-boat-row"><span>Boat</span><b id="rig-boat">—</b></div>
+    <div class="rig-row hidden" id="rig-spot-row"><span>Spot</span><b id="rig-spot">—</b></div>
   </div>
 
   <div id="cast-meter" class="hidden">
@@ -141,6 +143,22 @@
   </div>
 </div>
 
+<!-- ============================== CHART ============================= -->
+<div id="map" class="overlay panel hidden">
+  <div class="panel-box map-box">
+    <div class="panel-head">
+      <h2>🗺️ &nbsp;Lake Chart</h2>
+      <div class="map-found" id="map-found">0 / 8 spots</div>
+      <button class="x" data-close="map">✕</button>
+    </div>
+    <div class="map-wrap">
+      <canvas id="map-canvas" width="720" height="720"></canvas>
+    </div>
+    <div class="map-legend" id="map-legend"></div>
+    <div class="map-list" id="map-list"></div>
+  </div>
+</div>
+
 <!-- ============================== HELP ============================== -->
 <div id="help" class="overlay panel hidden">
   <div class="panel-box">
@@ -157,6 +175,15 @@
       <p>The <b>tension</b> bar is the only thing that can kill you. Pinned in the red for about half a second and the line parts.
          When a fish is <i>running</i>, stop reeling. When it is <i>giving</i>, wind like mad.
          <b>Drag</b> (mouse wheel) trades speed for safety: high drag gains line faster but loads the rod harder.</p>
+      <h3>Reading the lake</h3>
+      <p>There are eight named spots on this lake, and they are real features of
+         the bottom, not decoration — the deepest hole, the steepest drop-off, a
+         sunken hump with deep water all round it, a weed flat, a reed bay, a
+         point of land, a mid-depth shelf, and the dock you started on.</p>
+      <p>Fish one and it gets logged to your chart (<kbd>M</kbd>) with a note on
+         what lives there. Each spot heavily biases which species show up — the
+         single biggest lever in the game, bigger than lure, hour or weather.
+         Most of them are out of casting range from shore.</p>
       <h3>The boat</h3>
       <p>A rowboat is moored beside the dock. Press <kbd>E</kbd> to climb in and
          <kbd>W A S D</kbd> to row — it has real momentum, so give yourself room to stop.
@@ -179,7 +206,8 @@
         <div><kbd>RMB</kbd> cancel / reel in</div><div><kbd>Wheel</kbd> lure (or drag, mid-fight)</div>
         <div><kbd>1</kbd>…<kbd>7</kbd> pick lure</div><div><kbd>F</kbd> next lure</div>
         <div><kbd>R</kbd> reel in</div><div><kbd>E</kbd> board / leave boat</div>
-        <div><kbd>Q</kbd> anchor</div><div><kbd>Tab</kbd> journal</div>
+        <div><kbd>Q</kbd> anchor</div><div><kbd>M</kbd> lake chart</div>
+        <div><kbd>Tab</kbd> journal</div>
         <div><kbd>B</kbd> shop</div><div><kbd>P</kbd> stats</div>
         <div><kbd>H</kbd> this screen</div><div><kbd>Esc</kbd> pause</div>
       </div>

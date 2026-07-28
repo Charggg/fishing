@@ -256,6 +256,11 @@
     var d = ctx.depth;
     if (d < sp.depth[0]) w *= Math.exp(-Math.pow((sp.depth[0] - d) / 2.4, 2));
     else if (d > sp.depth[1]) w *= Math.exp(-Math.pow((d - sp.depth[1]) / 3.2, 2));
+    // Structure. Fishing the right spot is the biggest single lever there is.
+    if (ctx.spot && ctx.spot.bias) {
+      var b = ctx.spot.bias[sp.id];
+      w *= (b === undefined ? 0.50 : b);
+    }
     // Weather.
     if (ctx.weather === 'rain') w *= (sp.rarity >= 2 ? 1.35 : 1.1);
     if (ctx.weather === 'fog') w *= (sp.rarity >= 3 ? 1.5 : 0.9);

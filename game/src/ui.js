@@ -28,7 +28,9 @@
       'loading', 'load-fill', 'load-step', 'start', 'btn-play', 'hud', 'crosshair',
       'clock-time', 'clock-day', 'clock-ic', 'weather-ic', 'weather-name', 'money',
       'level', 'xp', 'dex', 'lurebar', 'hint', 'rig-rod', 'rig-lure', 'rig-depth',
-      'rig-dist', 'rig-boat', 'rig-boat-row', 'cast-meter', 'cm-fill', 'prompt', 'fight', 'fight-name',
+      'rig-dist', 'rig-boat', 'rig-boat-row', 'rig-spot', 'rig-spot-row', 'spots',
+      'map', 'map-canvas', 'map-found', 'map-list', 'map-legend',
+      'cast-meter', 'cm-fill', 'prompt', 'fight', 'fight-name',
       'fight-phase', 'fb-tension', 'fb-stamina', 'fb-line', 'fb-dist', 'fb-drag',
       'toasts', 'catch', 'catch-banner', 'catch-art', 'catch-name', 'catch-latin',
       'catch-weight', 'catch-length', 'catch-value', 'catch-grade',
@@ -191,6 +193,17 @@
     if (d.lure.id !== last.lure) { e['rig-lure'].textContent = d.lure.name; this.refreshLureBar(); }
     e['rig-depth'].textContent = d.depth > 0.05 ? d.depth.toFixed(1) + ' m deep' : '—';
     e['rig-dist'].textContent = d.castDist > 0.5 ? d.castDist.toFixed(1) + ' m out' : '—';
+    if (e['spots'] && d.spotsFound !== last.spotsFound) {
+      e['spots'].textContent = d.spotsFound + '/' + d.spotsTotal;
+    }
+    if (e['rig-spot-row']) {
+      var known = d.spot && this.game.state.spots && this.game.state.spots[d.spot.id];
+      e['rig-spot-row'].classList.toggle('hidden', !d.spot);
+      if (d.spot) {
+        e['rig-spot'].textContent = (known ? d.spot.icon + ' ' + d.spot.name : '❓ unmarked water');
+        e['rig-spot'].style.color = d.spotFishing ? 'var(--accent)' : 'var(--dim)';
+      }
+    }
     if (e['rig-boat-row']) {
       e['rig-boat-row'].classList.toggle('hidden', !d.boat);
       if (d.boat) {
@@ -202,7 +215,8 @@
 
     this.lastHUD = {
       money: d.money, level: d.level, xp: d.xp, clock: clock, day: d.day,
-      weather: d.weather.label, caught: d.caught, rod: d.rod.name, lure: d.lure.id, hint: d.hint
+      weather: d.weather.label, caught: d.caught, rod: d.rod.name, lure: d.lure.id, hint: d.hint,
+      spotsFound: d.spotsFound
     };
 
     if (this.statsOpen) {
@@ -517,6 +531,11 @@
     if (this.openPanel === 'help') return this.closePanel();
     this.showPanel('help');
   };
+  UI.prototype.toggleMap = function () {
+    if (this.openPanel === 'map') return this.closePanel();
+    this.renderMap();
+    this.showPanel('map');
+  };
   UI.prototype.toggleStats = function () {
     this.statsOpen = !this.statsOpen;
     this.el.stats.classList.toggle('hidden', !this.statsOpen);
@@ -553,7 +572,9 @@
       '<div><b>' + F.weight(st.totalWeight) + '</b>total weight</div>' +
       '<div><b>' + (best ? Sp.byId[best].name : '—') + '</b>personal best</div>' +
       '<div><b>' + st.casts + '</b>casts made</div>' +
-      '<div><b>' + st.breaks + '</b>lines snapped</div>';
+      '<div><b>' + st.breaks + '</b>lines snapped</div>' +
+      '<div><b>' + this.game.discoveredSpots().length + ' / ' + (this.game.spots || []).length +
+      '</b>spots on the chart</div>';
 
     var html = Sp.SPECIES.map(function (sp) {
       var n = st.caught[sp.id] || 0;
@@ -590,6 +611,264 @@
     return sp.depth[0].toFixed(0) + '–' + sp.depth[1].toFixed(0) + ' m · most active at ' +
       slots[bestI] + ' · likes the ' + (Sp.lureById[bestLure] ? Sp.lureById[bestLure].name.toLowerCase() : '?');
   }
+
+  /* --------------------------------------------------------------- chart
+     A bathymetric chart drawn straight from the same heightmap the terrain
+     mesh and the physics read, so the contours are the real lake bed. The
+     terrain layer never changes, so it is rasterised once and cached. */
+  var MAP_EXTENT = 190;          // world units covered, half-width
+  var CONTOUR = 4;               // metres between depth contours
+
+  // Bathymetric ramp, shallow to deep.
+  var DEPTH_RAMP = [
+    [0.0, [190, 224, 226]], [1.5, [140, 200, 214]], [3.5, [92, 172, 196]],
+    [7.0, [56, 138, 178]], [12.0, [40, 104, 150]], [18.0, [30, 74, 120]],
+    [26.0, [22, 52, 92]], [40.0, [16, 36, 68]]
+  ];
+  var LAND_RAMP = [
+    [0.0, [214, 200, 158]], [2.5, [150, 168, 108]], [10.0, [104, 138, 84]],
+    [26.0, [96, 106, 76]], [50.0, [126, 124, 112]], [90.0, [206, 210, 214]]
+  ];
+  function ramp(table, v) {
+    for (var i = 1; i < table.length; i++) {
+      if (v <= table[i][0]) {
+        var a = table[i - 1], b = table[i];
+        var k = (v - a[0]) / (b[0] - a[0]);
+        return [
+          a[1][0] + (b[1][0] - a[1][0]) * k,
+          a[1][1] + (b[1][1] - a[1][1]) * k,
+          a[1][2] + (b[1][2] - a[1][2]) * k
+        ];
+      }
+    }
+    return table[table.length - 1][1];
+  }
+
+  UI.prototype.buildMapTerrain = function () {
+    if (this._mapTerrain) return this._mapTerrain;
+    var g = this.game, w = g.world;
+    var N = 512;
+    var cv = document.createElement('canvas');
+    cv.width = N; cv.height = N;
+    var ctx = cv.getContext('2d');
+    var img = ctx.createImageData(N, N);
+    var px = img.data;
+    var scale = (MAP_EXTENT * 2) / N;
+
+    for (var j = 0; j < N; j++) {
+      var wz = -MAP_EXTENT + (j + 0.5) * scale;
+      for (var i = 0; i < N; i++) {
+        var wx = -MAP_EXTENT + (i + 0.5) * scale;
+        var h = w.sample(wx, wz);
+        var col;
+        if (h < 0) {
+          col = ramp(DEPTH_RAMP, -h);
+          // Contour lines: darken where a depth band boundary is crossed.
+          var hr = w.sample(wx + scale, wz), hd = w.sample(wx, wz + scale);
+          var band = Math.floor(-h / CONTOUR);
+          if (Math.floor(-hr / CONTOUR) !== band || Math.floor(-hd / CONTOUR) !== band) {
+            col = [col[0] * 0.72, col[1] * 0.72, col[2] * 0.74];
+          }
+        } else {
+          col = ramp(LAND_RAMP, h);
+          // Hillshade from the north-west so the terrain reads as relief.
+          var e = scale;
+          var gx = (w.sample(wx + e, wz) - w.sample(wx - e, wz)) / (2 * e);
+          var gz = (w.sample(wx, wz + e) - w.sample(wx, wz - e)) / (2 * e);
+          var shade = M.clamp(0.72 + (-gx * 0.55 - gz * 0.55) * 1.6, 0.35, 1.5);
+          col = [col[0] * shade, col[1] * shade, col[2] * shade];
+        }
+        var k2 = (j * N + i) * 4;
+        px[k2] = col[0]; px[k2 + 1] = col[1]; px[k2 + 2] = col[2]; px[k2 + 3] = 255;
+      }
+    }
+    ctx.putImageData(img, 0, 0);
+    this._mapTerrain = cv;
+    return cv;
+  };
+
+  UI.prototype.renderMap = function () {
+    var g = this.game;
+    if (!g.spots) return;
+    var cv = this.el['map-canvas'];
+    var ctx = cv.getContext('2d');
+    var W = cv.width, H = cv.height;
+    var st = g.state;
+
+    function toPx(x, z) {
+      return [(x + MAP_EXTENT) / (MAP_EXTENT * 2) * W, (z + MAP_EXTENT) / (MAP_EXTENT * 2) * H];
+    }
+
+    ctx.clearRect(0, 0, W, H);
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(this.buildMapTerrain(), 0, 0, W, H);
+
+    // Vignette so the chart sits inside its frame.
+    var vg = ctx.createRadialGradient(W / 2, H / 2, W * 0.32, W / 2, H / 2, W * 0.72);
+    vg.addColorStop(0, 'rgba(0,0,0,0)');
+    vg.addColorStop(1, 'rgba(2,6,12,0.34)');
+    ctx.fillStyle = vg;
+    ctx.fillRect(0, 0, W, H);
+
+    // --- the dock
+    var d = g.dock;
+    var a = toPx(d.x, d.z), b = toPx(d.endX, d.endZ);
+    ctx.strokeStyle = 'rgba(60,40,28,0.95)';
+    ctx.lineWidth = 7; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke();
+    ctx.strokeStyle = 'rgba(190,160,120,0.9)';
+    ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke();
+
+    // --- spots
+    for (var i = 0; i < g.spots.length; i++) {
+      var s = g.spots[i];
+      var found = !!(st.spots && st.spots[s.id]);
+      var p = toPx(s.x, s.z);
+      var rpx = s.radius / (MAP_EXTENT * 2) * W;
+      if (!found) {
+        // Hint at unexplored structure without giving it away.
+        ctx.setLineDash([4, 6]);
+        ctx.strokeStyle = 'rgba(200,220,235,0.20)';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.arc(p[0], p[1], rpx, 0, Math.PI * 2); ctx.stroke();
+        ctx.setLineDash([]);
+        continue;
+      }
+      ctx.fillStyle = 'rgba(127,227,216,0.14)';
+      ctx.beginPath(); ctx.arc(p[0], p[1], rpx, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = 'rgba(127,227,216,0.75)';
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(p[0], p[1], rpx, 0, Math.PI * 2); ctx.stroke();
+
+      // A drawn pin, not an emoji: canvases cannot be trusted to have the font.
+      ctx.save();
+      ctx.translate(p[0], p[1]);
+      ctx.fillStyle = '#7fe3d8';
+      ctx.strokeStyle = 'rgba(6,14,22,0.9)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(0, 9);
+      ctx.bezierCurveTo(-8, -1, -7.5, -12, 0, -12);
+      ctx.bezierCurveTo(7.5, -12, 8, -1, 0, 9);
+      ctx.closePath();
+      ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#08131d';
+      ctx.beginPath(); ctx.arc(0, -5, 3.1, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+
+      ctx.textAlign = 'center';
+      ctx.font = '600 13px ui-sans-serif, system-ui, sans-serif';
+      ctx.textBaseline = 'top';
+      var label = s.name;
+      var tw = ctx.measureText(label).width;
+      ctx.fillStyle = 'rgba(4,10,18,0.78)';
+      ctx.fillRect(p[0] - tw / 2 - 5, p[1] + rpx + 4, tw + 10, 18);
+      ctx.fillStyle = '#dff2f6';
+      ctx.fillText(label, p[0], p[1] + rpx + 6);
+    }
+
+    // --- the boat
+    var bt = g.boat;
+    var bp = toPx(bt.x, bt.z);
+    ctx.save();
+    ctx.translate(bp[0], bp[1]);
+    // World heading 0 faces -Z, which is up on the chart.
+    ctx.rotate(-bt.heading);
+    ctx.fillStyle = bt.aboard ? '#ffc45c' : '#c9a06a';
+    ctx.strokeStyle = 'rgba(10,16,24,0.85)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(0, -11); ctx.lineTo(6, 8); ctx.lineTo(0, 4); ctx.lineTo(-6, 8);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.restore();
+    if (bt.anchored) {
+      ctx.strokeStyle = '#ffc45c';
+      ctx.lineWidth = 1.8;
+      var ax = bp[0] + 14, ay = bp[1] - 12;
+      ctx.beginPath();
+      ctx.moveTo(ax, ay - 5); ctx.lineTo(ax, ay + 5);
+      ctx.moveTo(ax - 4, ay - 2); ctx.lineTo(ax + 4, ay - 2);
+      ctx.moveTo(ax - 5, ay + 2); ctx.quadraticCurveTo(ax, ay + 9, ax + 5, ay + 2);
+      ctx.stroke();
+    }
+
+    // --- the player, with a view cone (hidden while aboard: same place)
+    if (!bt.aboard) {
+      var pp = toPx(g.player.x, g.player.z);
+      var yaw = g.player.yaw;
+      ctx.save();
+      ctx.translate(pp[0], pp[1]);
+      ctx.rotate(-yaw);
+      var cone = ctx.createLinearGradient(0, 0, 0, -46);
+      cone.addColorStop(0, 'rgba(127,227,216,0.42)');
+      cone.addColorStop(1, 'rgba(127,227,216,0)');
+      ctx.fillStyle = cone;
+      ctx.beginPath(); ctx.moveTo(0, 0);
+      ctx.arc(0, 0, 46, -Math.PI / 2 - 0.55, -Math.PI / 2 + 0.55);
+      ctx.closePath(); ctx.fill();
+      ctx.restore();
+      ctx.fillStyle = '#7fe3d8';
+      ctx.strokeStyle = 'rgba(6,12,20,0.9)'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(pp[0], pp[1], 5, 0, Math.PI * 2);
+      ctx.fill(); ctx.stroke();
+    }
+
+    // --- where the lure is sitting
+    if (g.tackle.state !== 'idle') {
+      var tp = toPx(g.tackle.x, g.tackle.z);
+      ctx.fillStyle = '#ff6b6b';
+      ctx.strokeStyle = 'rgba(6,12,20,0.9)'; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(tp[0], tp[1], 3.5, 0, Math.PI * 2);
+      ctx.fill(); ctx.stroke();
+    }
+
+    // --- north arrow and scale bar
+    ctx.fillStyle = 'rgba(4,10,18,0.72)';
+    ctx.fillRect(W - 58, 12, 46, 52);
+    ctx.fillStyle = '#dff2f6';
+    ctx.font = '600 11px ui-sans-serif, system-ui, sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('N', W - 35, 52);
+    ctx.beginPath();
+    ctx.moveTo(W - 35, 20); ctx.lineTo(W - 41, 40); ctx.lineTo(W - 35, 35);
+    ctx.lineTo(W - 29, 40); ctx.closePath();
+    ctx.fill();
+
+    var barWorld = 50;
+    var barPx = barWorld / (MAP_EXTENT * 2) * W;
+    ctx.fillStyle = 'rgba(4,10,18,0.72)';
+    ctx.fillRect(W - barPx - 24, H - 40, barPx + 16, 28);
+    ctx.fillStyle = '#dff2f6';
+    ctx.fillRect(W - barPx - 16, H - 22, barPx, 3);
+    ctx.fillRect(W - barPx - 16, H - 26, 2, 10);
+    ctx.fillRect(W - 18, H - 26, 2, 10);
+    ctx.font = '10px ui-monospace, monospace';
+    ctx.fillText(barWorld + ' m', W - barPx / 2 - 16, H - 33);
+
+    // --- legend + list
+    this.el['map-legend'].innerHTML =
+      '<i><span class="sw" style="background:#8fd0dd"></span>shallow</i>' +
+      '<i><span class="sw" style="background:#388ab2"></span>mid</i>' +
+      '<i><span class="sw" style="background:#162444"></span>deep</i>' +
+      '<i>contours every ' + CONTOUR + ' m</i>';
+
+    var found = g.discoveredSpots().length;
+    this.el['map-found'].textContent = found + ' / ' + g.spots.length + ' spots';
+    this.el['map-list'].innerHTML = g.spots.map(function (sp) {
+      var known = !!(st.spots && st.spots[sp.id]);
+      if (!known) {
+        return '<div class="map-card locked"><div class="mc-top">' +
+          '<span>❓</span><span class="mc-name">Unmarked water</span>' +
+          '<span class="mc-depth">—</span></div>' +
+          '<div class="mc-hint">Cast here to log it.</div></div>';
+      }
+      return '<div class="map-card"><div class="mc-top">' +
+        '<span>' + sp.icon + '</span><span class="mc-name">' + sp.name + '</span>' +
+        '<span class="mc-depth">' + sp.depth.toFixed(1) + ' m</span></div>' +
+        '<div class="mc-hint">' + sp.hint + '</div></div>';
+    }).join('');
+  };
 
   /* ---------------------------------------------------------------- shop */
   UI.prototype.renderShop = function () {

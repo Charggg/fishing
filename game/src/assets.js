@@ -387,6 +387,202 @@
     return m.build();
   }
 
+  /* ------------------------------------------------------------- the boat
+     A clinker-ish rowboat, lofted from station curves. Bow points along -Z so
+     the hull shares the camera's heading convention: forward = (-sin h, -cos h).
+
+     Stations run bow (t=0) to transom (t=1). Each is a curve swept by u in
+     [-1,1] from the port gunwale, down through the keel, up to starboard. */
+  var BOAT_LEN = 3.7;
+
+  function boatBeam(t) {
+    var tbl = [
+      [0.00, 0.045], [0.10, 0.240], [0.24, 0.430], [0.40, 0.570],
+      [0.56, 0.645], [0.72, 0.660], [0.88, 0.630], [1.00, 0.560]
+    ];
+    for (var i = 1; i < tbl.length; i++) {
+      if (t <= tbl[i][0]) {
+        var a = tbl[i - 1], b = tbl[i];
+        return M.lerp(a[1], b[1], M.smoothstep(0, 1, (t - a[0]) / (b[0] - a[0])));
+      }
+    }
+    return 0.56;
+  }
+  // Sheer line: gunwale rides high at bow and stern, dips amidships.
+  function boatSheer(t) { return 0.62 - 0.21 * Math.sin(Math.PI * Math.pow(t, 0.9)); }
+  // Keel line: deepest just aft of amidships, rising to the stem and transom.
+  function boatKeel(t) { return -0.34 * Math.pow(Math.sin(Math.PI * Math.pow(t, 0.78)), 0.55) - 0.02; }
+
+  function boatPoint(t, u, inset, rise) {
+    var beam = Math.max(boatBeam(t) - inset, 0.01);
+    var gun = boatSheer(t);
+    var keel = boatKeel(t) + rise;
+    var au = Math.abs(u);
+    return [
+      beam * (u < 0 ? -1 : 1) * Math.pow(au, 0.72),
+      keel + (gun - keel) * Math.pow(au, 1.85),
+      -BOAT_LEN / 2 + t * BOAT_LEN
+    ];
+  }
+
+  /* Loft a shell and derive vertex normals from the parametric grid, which is
+     cleaner than accumulating face normals for a surface this smooth. */
+  function addBoatShell(m, NS, NU, inset, rise, col, flip) {
+    var grid = [], pts = [];
+    var s, u, i, j;
+    for (i = 0; i <= NS; i++) {
+      var t = i / NS;
+      var row = [];
+      for (j = 0; j <= NU; j++) {
+        row.push(boatPoint(t, -1 + 2 * j / NU, inset, rise));
+      }
+      pts.push(row);
+    }
+    function at(i, j) {
+      return pts[M.clamp(i, 0, NS) | 0][M.clamp(j, 0, NU) | 0];
+    }
+    for (i = 0; i <= NS; i++) {
+      var ids = [];
+      for (j = 0; j <= NU; j++) {
+        var p = pts[i][j];
+        var dt = [], du = [];
+        var a = at(i + 1, j), b = at(i - 1, j);
+        var c = at(i, j + 1), d = at(i, j - 1);
+        for (var k = 0; k < 3; k++) { dt[k] = a[k] - b[k]; du[k] = c[k] - d[k]; }
+        var nx = du[1] * dt[2] - du[2] * dt[1];
+        var ny = du[2] * dt[0] - du[0] * dt[2];
+        var nz = du[0] * dt[1] - du[1] * dt[0];
+        var nl = Math.hypot(nx, ny, nz) || 1;
+        var f = flip ? -1 : 1;
+        // A little plank banding so the hull is not a flat colour.
+        var band = 0.9 + 0.14 * (Math.abs(Math.sin(p[1] * 22.0)) > 0.55 ? 1 : 0);
+        ids.push(m.vert(p[0], p[1], p[2], nx / nl * f, ny / nl * f, nz / nl * f,
+          col[0] * band, col[1] * band, col[2] * band, 0));
+      }
+      grid.push(ids);
+    }
+    for (i = 0; i < NS; i++) {
+      for (j = 0; j < NU; j++) {
+        if (flip) m.quad(grid[i][j], grid[i + 1][j], grid[i + 1][j + 1], grid[i][j + 1]);
+        else m.quad(grid[i][j], grid[i][j + 1], grid[i + 1][j + 1], grid[i + 1][j]);
+      }
+    }
+    return grid;
+  }
+
+  function buildBoat() {
+    var m = new Mesh();
+    var NS = 20, NU = 12;
+    var paint = [0.20, 0.32, 0.34];     // faded green-blue topsides
+    var inner = [0.31, 0.25, 0.185];    // bare wood inside, weathered grey-brown
+    var rail = [0.235, 0.185, 0.135];
+    var trim = [0.46, 0.41, 0.33];
+
+    var outer = addBoatShell(m, NS, NU, 0, 0, paint, false);
+    var lining = addBoatShell(m, NS, NU, 0.055, 0.075, inner, true);
+
+    // Gunwale cap: a rail joining the outer and inner top edges, both sides.
+    for (var i = 0; i < NS; i++) {
+      for (var e = 0; e < 2; e++) {
+        var j = e === 0 ? 0 : NU;
+        var t0 = i / NS, t1 = (i + 1) / NS;
+        var u = e === 0 ? -1 : 1;
+        var a = boatPoint(t0, u, 0, 0), b = boatPoint(t1, u, 0, 0);
+        var c = boatPoint(t0, u, 0.055, 0.075), d = boatPoint(t1, u, 0.055, 0.075);
+        var ia = m.vert(a[0], a[1], a[2], 0, 1, 0, rail[0], rail[1], rail[2], 0);
+        var ib = m.vert(b[0], b[1], b[2], 0, 1, 0, rail[0], rail[1], rail[2], 0);
+        var ic = m.vert(c[0], c[1], c[2], 0, 1, 0, rail[0], rail[1], rail[2], 0);
+        var id = m.vert(d[0], d[1], d[2], 0, 1, 0, rail[0], rail[1], rail[2], 0);
+        if (u < 0) m.quad(ia, ib, id, ic); else m.quad(ia, ic, id, ib);
+      }
+    }
+
+    // Transom: closes the stern between the outer and inner shells.
+    var tr = [];
+    for (var j2 = 0; j2 <= NU; j2++) {
+      var uu = -1 + 2 * j2 / NU;
+      var po = boatPoint(1, uu, 0, 0);
+      var pi = boatPoint(1, uu, 0.055, 0.075);
+      tr.push([
+        m.vert(po[0], po[1], po[2], 0, 0.1, 1, rail[0], rail[1], rail[2], 0),
+        m.vert(pi[0], pi[1], pi[2], 0, 0.1, 1, rail[0] * 1.1, rail[1] * 1.1, rail[2] * 1.1, 0)
+      ]);
+    }
+    for (var j3 = 0; j3 < NU; j3++) m.quad(tr[j3][0], tr[j3][1], tr[j3 + 1][1], tr[j3 + 1][0]);
+
+    // Floorboards.
+    for (var fb = 0; fb < 5; fb++) {
+      var ft = 0.24 + fb * 0.13;
+      var fz = -BOAT_LEN / 2 + ft * BOAT_LEN;
+      addBox(m, 0, boatKeel(ft) + 0.10, fz, boatBeam(ft) * 1.15, 0.035, 0.16, inner, 0);
+    }
+
+    // Thwarts (seats) fore and aft, plus a rowing bench amidships.
+    [0.30, 0.50, 0.82].forEach(function (st, idx) {
+      var sz = -BOAT_LEN / 2 + st * BOAT_LEN;
+      var sy = boatSheer(st) - 0.14;
+      addBox(m, 0, sy, sz, boatBeam(st) * 1.9, 0.055, 0.26,
+        idx === 1 ? trim : [inner[0] * 1.15, inner[1] * 1.15, inner[2] * 1.15], 0);
+    });
+
+    // Oarlocks on the gunwale, level with the rowing bench.
+    var lockT = 0.50;
+    var lockZ = -BOAT_LEN / 2 + lockT * BOAT_LEN;
+    for (var sgn = -1; sgn <= 1; sgn += 2) {
+      var lk = new Mesh();
+      addCylinder(lk, 0.035, 0.030, 0.11, 8, [0.42, 0.44, 0.47], [0.52, 0.54, 0.58], 0, 0, true, true);
+      m.append(lk, sgn * boatBeam(lockT), boatSheer(lockT), lockZ, 1, 0);
+    }
+
+    // Stem post and a mooring cleat at the bow.
+    var stem = new Mesh();
+    addCylinder(stem, 0.05, 0.035, 0.20, 8, rail, trim, 0, 0, true, false);
+    m.append(stem, 0, boatSheer(0.02) - 0.05, -BOAT_LEN / 2 + 0.10, 1, 0);
+
+    // A bailing bucket, because every rowboat has one.
+    var bucket = new Mesh();
+    addCylinder(bucket, 0.11, 0.13, 0.20, 10, [0.45, 0.28, 0.16], [0.55, 0.34, 0.19], 0, 0, false, true);
+    m.append(bucket, 0.22, boatKeel(0.86) + 0.12, -BOAT_LEN / 2 + 0.86 * BOAT_LEN, 1, 0);
+
+    return m.build();
+  }
+
+  // One oar, shaft along +X with the pivot at the oarlock. The left oar is the
+  // same mesh rotated 180 degrees about Y, so winding stays correct.
+  function buildOar() {
+    var m = new Mesh();
+    var wood = [0.55, 0.44, 0.30];
+    var dark = [0.42, 0.33, 0.22];
+    var shaft = new Mesh();
+    addCylinder(shaft, 0.028, 0.022, 1.62, 8, dark, wood, 0, 0, true, true);
+    // Rotate the shaft from +Y onto +X by building it and swapping axes.
+    var d = shaft.v;
+    for (var i = 0; i < d.length; i += STRIDE) {
+      var px = d[i], py = d[i + 1];
+      d[i] = py - 0.42; d[i + 1] = -px;         // pivot 0.42 in from the grip
+      var nx = d[i + 3], ny = d[i + 4];
+      d[i + 3] = ny; d[i + 4] = -nx;
+    }
+    m.append(shaft, 0, 0, 0, 1, 0);
+    // Blade.
+    addBlade(m, [
+      [1.02, 0, -0.035], [1.44, 0, -0.085], [1.62, 0, 0], [1.44, 0, 0.085], [1.02, 0, 0.035]
+    ], [0, 1, 0], wood, function () { return 0; });
+    addBox(m, 1.30, 0, 0, 0.60, 0.018, 0.16, dark, 0);
+    // Grip.
+    var grip = new Mesh();
+    addCylinder(grip, 0.032, 0.032, 0.14, 8, [0.30, 0.24, 0.18], [0.30, 0.24, 0.18], 0, 0, true, true);
+    var gd = grip.v;
+    for (var k = 0; k < gd.length; k += STRIDE) {
+      var gx = gd[k], gy = gd[k + 1];
+      gd[k] = gy - 0.50; gd[k + 1] = -gx;
+      var gnx = gd[k + 3], gny = gd[k + 4];
+      gd[k + 3] = gny; gd[k + 4] = -gnx;
+    }
+    m.append(grip, 0, 0, 0, 1, 0);
+    return m.build();
+  }
+
   // --------------------------------------------------------------- the dock
   function buildDock(length, width) {
     var m = new Mesh();
@@ -598,6 +794,11 @@
     buildRock: buildRock,
     buildLilypad: buildLilypad,
     buildDock: buildDock,
+    buildBoat: buildBoat,
+    buildOar: buildOar,
+    BOAT_LEN: BOAT_LEN,
+    boatBeam: boatBeam,
+    boatSheer: boatSheer,
     buildRod: buildRod,
     buildReelHandle: buildReelHandle,
     buildBobber: buildBobber,

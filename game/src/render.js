@@ -21,6 +21,8 @@
     iColor: 5, iParam: 5
   };
 
+  var UP_Y = new Float32Array([0, 1, 0]);
+
   var QUALITY = {
     low:    { scale: 0.62, refl: 0.25, refr: 0.35, bloom: false, water: 140, fishDist: 55,  reflProps: false, reflFrac: 0 },
     medium: { scale: 0.85, refl: 0.38, refr: 0.50, bloom: true,  water: 210, fishDist: 80,  reflProps: true,  reflFrac: 0.45 },
@@ -466,7 +468,7 @@
     var target = [
       s.camPos[0] + s.forward[0], s.camPos[1] + s.forward[1], s.camPos[2] + s.forward[2]
     ];
-    M4.lookAt(this.view, s.camPos, target, [0, 1, 0]);
+    M4.lookAt(this.view, s.camPos, target, s.up || UP_Y);
     M4.multiply(this.viewProj, this.proj, this.view);
     M4.invert(this.invViewProj, this.viewProj);
     M4.invert(this.camToWorld, this.view);

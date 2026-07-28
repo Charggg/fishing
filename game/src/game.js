@@ -80,9 +80,22 @@
     this.hint = '';
     this.spinnerMove = 0;
 
+    /* The rowboat. `aboard` swaps the whole movement model over; everything
+       else about fishing is unchanged, because the rod is camera-relative. */
+    this.boat = {
+      aboard: false, anchored: false,
+      x: 0, z: 0, heading: 0, y: 0,
+      vx: 0, vz: 0, vh: 0,
+      pitch: 0, roll: 0,
+      stroke: 0, strokePower: 0, lastStroke: 0,
+      wakeTimer: 0, spookTimer: 0,
+      matrix: M4.create(), oarL: M4.create(), oarR: M4.create()
+    };
+
     this.scene = {
       camPos: new Float32Array(3),
       forward: new Float32Array(3),
+      up: new Float32Array([0, 1, 0]),
       fov: M.rad(70),
       sun: {
         dir: this.env.sunDir, lightDir: this.env.lightDir, color: this.env.sunColor,
@@ -124,7 +137,9 @@
       records: {}, caught: {},
       totalCatches: 0, totalWeight: 0, casts: 0, breaks: 0, escapes: 0,
       hour: 5.6, day: 1,
-      seenTutorial: false
+      seenTutorial: false,
+      boat: null,          // {x, z, heading, anchored, aboard}
+      boatSeen: false
     };
   };
 
@@ -171,8 +186,11 @@
         r.meshRod = r.makeSolidMesh(A.buildRod());
         r.meshReelHandle = r.makeSolidMesh(A.buildReelHandle());
         r.meshBobber = r.makeSolidMesh(A.buildBobber());
+        r.meshBoat = r.makeSolidMesh(A.buildBoat());
+        r.meshOar = r.makeSolidMesh(A.buildOar());
         r.setQuality(self.detectQuality(), 190);
       }],
+      ['Launching the boat', function () { self.setupBoat(); }],
       ['Casting off', function () {
         var sp = self.world.spawn(self.dock);
         self.player.x = sp.x; self.player.z = sp.z; self.player.yaw = sp.yaw;
@@ -348,6 +366,8 @@
     if (k === 'b') { this.ui.toggleShop(); return; }
     if (k === 'h') { this.ui.toggleHelp(); return; }
     if (k === 'r' && (this.mode === 'fishing' || this.mode === 'flying')) { this.reelIn(); return; }
+    if (k === 'e') { this.toggleBoat(); return; }
+    if (k === 'q') { this.toggleAnchor(); return; }
     if (k === 'f') { this.cycleLure(1); return; }
     if (k >= '1' && k <= '9') {
       var idx = parseInt(k, 10) - 1;
@@ -681,13 +701,281 @@
     return h;
   };
 
+  /* ====================================================================== */
+  /*  THE BOAT                                                              */
+  /* ====================================================================== */
+
+  // Moor it off the end of the dock, in water deep enough to float.
+  Game.prototype.setupBoat = function () {
+    var b = this.boat, d = this.dock;
+    var saved = this.state.boat;
+    if (saved && isFinite(saved.x) && isFinite(saved.z) &&
+        this.world.depthAt(saved.x, saved.z) > 0.5) {
+      b.x = saved.x; b.z = saved.z; b.heading = saved.heading || 0;
+      b.anchored = !!saved.anchored;
+    } else {
+      // Alongside the dock, a couple of metres off the port side.
+      var sideX = -d.dirZ, sideZ = d.dirX;
+      var along = d.length - 3.0;
+      b.x = d.x + d.dirX * along + sideX * 2.5;
+      b.z = d.z + d.dirZ * along + sideZ * 2.5;
+      // Nudge outward until it is genuinely afloat.
+      for (var i = 0; i < 30 && this.world.depthAt(b.x, b.z) < 0.9; i++) {
+        b.x += sideX * 0.4; b.z += sideZ * 0.4;
+      }
+      b.heading = Math.atan2(-d.dirX, -d.dirZ);
+      b.anchored = true;
+    }
+    b.aboard = false;
+    b.y = Ent.waveHeight(b.x, b.z, 0, 1);
+    this.scene.solids.push(
+      { mesh: this.renderer.meshBoat, matrix: b.matrix, tint: [1, 1, 1], spec: 0.10, emissive: 0 },
+      { mesh: this.renderer.meshOar, matrix: b.oarL, tint: [1, 1, 1], spec: 0.06, emissive: 0 },
+      { mesh: this.renderer.meshOar, matrix: b.oarR, tint: [1, 1, 1], spec: 0.06, emissive: 0 }
+    );
+    this.updateBoat(0);
+  };
+
+  Game.prototype.boatDistance = function () {
+    return Math.hypot(this.player.x - this.boat.x, this.player.z - this.boat.z);
+  };
+
+  Game.prototype.toggleBoat = function () {
+    var b = this.boat, p = this.player;
+    if (this.mode === 'fighting') {
+      this.ui.showToast('Not while something is on the line.', 'warn');
+      return;
+    }
+    if (!b.aboard) {
+      if (this.boatDistance() > 3.6) return;
+      b.aboard = true;
+      this.reelIn();
+      this.state.boatSeen = true;
+      this.audio.footstep(true);
+      this.audio.splash(0.35);
+      this.ui.showToast('Aboard. [W A S D] to row, [Q] anchor, [E] step out.', 'good');
+      this.save();
+      return;
+    }
+    // Stepping out: find somewhere solid within reach.
+    var best = null, bestD = 1e9;
+    for (var a = 0; a < 16; a++) {
+      var ang = a / 16 * M.TAU;
+      for (var r = 1.4; r <= 3.4; r += 0.4) {
+        var tx = b.x + Math.cos(ang) * r, tz = b.z + Math.sin(ang) * r;
+        var solid = this.world.onDock(this.dock, tx, tz) || this.world.sample(tx, tz) > -0.95;
+        if (solid && r < bestD) { bestD = r; best = [tx, tz]; }
+      }
+    }
+    if (!best) {
+      this.ui.showToast('Too far from shore to step out.', 'warn');
+      this.audio.deny();
+      return;
+    }
+    b.aboard = false;
+    b.vx = 0; b.vz = 0; b.vh = 0;
+    p.x = best[0]; p.z = best[1];
+    p.y = this.groundAt(p.x, p.z) + 1.62;
+    this.reelIn();
+    this.audio.footstep(this.world.onDock(this.dock, p.x, p.z));
+    this.save();
+  };
+
+  Game.prototype.toggleAnchor = function () {
+    var b = this.boat;
+    if (!b.aboard) return;
+    if (!b.anchored && this.world.depthAt(b.x, b.z) > 22) {
+      this.ui.showToast('Too deep to anchor here.', 'warn');
+      this.audio.deny();
+      return;
+    }
+    b.anchored = !b.anchored;
+    if (b.anchored) { b.vx = 0; b.vz = 0; b.vh = 0; this.audio.splash(0.5); }
+    else this.audio.plunk();
+    this.ui.showToast(b.anchored ? '⚓ Anchor down.' : '⚓ Anchor up.', 'good');
+    this.save();
+  };
+
+  var _wv = [0, 0, 0];
+  Game.prototype.updateBoat = function (dt) {
+    var b = this.boat, s = this.scene, k = this.keys;
+    var wave = Ent.waveHeight;
+
+    if (b.aboard && !b.anchored) {
+      var throttle = (k['w'] || k['arrowup'] ? 1 : 0) - (k['s'] || k['arrowdown'] ? 0.55 : 0);
+      var turn = (k['a'] || k['arrowleft'] ? 1 : 0) - (k['d'] || k['arrowright'] ? 1 : 0);
+      if (this.mode === 'fighting' || this.mode === 'charging') throttle *= 0.35;
+
+      // Rowing is pulsed, not continuous: thrust arrives on the pull.
+      if (throttle !== 0) {
+        b.stroke += dt * (throttle > 0 ? 3.1 : 2.2);
+        var pulse = Math.max(0, Math.sin(b.stroke));
+        b.strokePower = pulse;
+        var accel = throttle * pulse * 5.4;
+        var fx = -Math.sin(b.heading), fz = -Math.cos(b.heading);
+        b.vx += fx * accel * dt;
+        b.vz += fz * accel * dt;
+        // Catch of each stroke: splash and a little audio.
+        if (Math.sin(b.stroke) > 0.98 && this.time - b.lastStroke > 0.5) {
+          b.lastStroke = this.time;
+          this.audio.noiseBurst({ f0: 900, f1: 260, dur: 0.20, gain: 0.055, q: 0.9, attack: 0.02 });
+          var rx = Math.cos(b.heading), rz = -Math.sin(b.heading);
+          for (var o = -1; o <= 1; o += 2) {
+            this.ripples.spawn(b.x + rx * o * 1.7, b.z + rz * o * 1.7, 0.06, 0.9, 1.1, 0.32, 0.4);
+          }
+        }
+      } else {
+        b.strokePower = M.damp(b.strokePower, 0, 4, dt);
+      }
+      b.vh += turn * 1.35 * dt;
+    } else {
+      b.strokePower = M.damp(b.strokePower, 0, 4, dt);
+    }
+
+    var holding = b.anchored || !b.aboard;
+    if (holding) { b.vx = 0; b.vz = 0; b.vh *= Math.exp(-6 * dt); }
+    else {
+      // Water drag, plus a slow push from the wind.
+      var drag = Math.exp(-1.30 * dt);
+      b.vx *= drag; b.vz *= drag;
+      b.vh *= Math.exp(-2.7 * dt);
+      var push = s.windStrength * 1.7 * dt;
+      b.vx += s.wind[0] * push;
+      b.vz += s.wind[1] * push;
+    }
+    b.heading += b.vh * dt;
+
+    var nx = b.x + b.vx * dt, nz = b.z + b.vz * dt;
+    if (this.world.depthAt(nx, nz) > 0.55 && Math.hypot(nx, nz) < 178) {
+      b.x = nx; b.z = nz;
+    } else {
+      // Nose into the shallows and stop, rather than beaching.
+      b.vx *= -0.20; b.vz *= -0.20;
+      if (b.aboard && this.time - (b._bump || 0) > 1.2) {
+        b._bump = this.time;
+        this.audio.noiseBurst({ f0: 190, f1: 80, dur: 0.24, gain: 0.07, q: 1.4, filter: 'lowpass' });
+      }
+    }
+
+    // Ride the wave field, and tilt to its slope.
+    var t = s.waveTime, ws = s.waveScale;
+    b.y = wave(b.x, b.z, t, ws) + 0.02;
+    var e = 0.9;
+    var hx = (wave(b.x + e, b.z, t, ws) - wave(b.x - e, b.z, t, ws)) / (2 * e);
+    var hz = (wave(b.x, b.z + e, t, ws) - wave(b.x, b.z - e, t, ws)) / (2 * e);
+    var fwx = -Math.sin(b.heading), fwz = -Math.cos(b.heading);
+    var rgx = Math.cos(b.heading), rgz = -Math.sin(b.heading);
+    var pitchWant = Math.atan(hx * fwx + hz * fwz) * 1.5 - b.strokePower * 0.035;
+    var rollWant = Math.atan(hx * rgx + hz * rgz) * 1.5;
+    b.pitch = M.damp(b.pitch, pitchWant, 6, dt);
+    b.roll = M.damp(b.roll, rollWant, 6, dt);
+
+    // Transform.
+    M4.fromTranslation(b.matrix, [b.x, b.y, b.z]);
+    M4.rotateY(b.matrix, b.matrix, b.heading);
+    M4.rotateX(b.matrix, b.matrix, b.pitch);
+    M4.rotateZ(b.matrix, b.matrix, -b.roll);
+
+    // Oars: sweep fore-and-aft, lifting clear of the water on the recovery.
+    var sweep = Math.sin(b.stroke) * 0.62;
+    var lift = (1 - Math.max(0, Math.sin(b.stroke))) * 0.55 - 0.18;
+    if (!b.aboard) { sweep = 0.9; lift = 0.55; }   // shipped, stowed inboard
+    var lockZ = -A.BOAT_LEN / 2 + 0.50 * A.BOAT_LEN;
+    var lockX = A.boatBeam(0.50), lockY = A.boatSheer(0.50);
+    for (var side = 0; side < 2; side++) {
+      var sgn = side === 0 ? -1 : 1;
+      var out = side === 0 ? b.oarL : b.oarR;
+      M4.identity(_mBoat);
+      M4.translate(_mBoat, _mBoat, [sgn * lockX, lockY, lockZ]);
+      M4.rotateY(_mBoat, _mBoat, side === 0 ? Math.PI : 0);
+      M4.rotateY(_mBoat, _mBoat, sweep);
+      M4.rotateZ(_mBoat, _mBoat, -lift);
+      M4.multiply(out, b.matrix, _mBoat);
+    }
+
+    // First time you wander near it, say what it is. Once.
+    if (!b.aboard && !this.state.boatSeen && this.started && this.boatDistance() < 7) {
+      this.state.boatSeen = true;
+      this.ui.showToast('🚣 A rowboat. Press [E] to take it out on the lake.', 'good');
+      this.save();
+    }
+
+    var speed = Math.hypot(b.vx, b.vz);
+
+    // Wake ripples and a bow splash while under way.
+    if (b.aboard && speed > 0.35) {
+      b.wakeTimer -= dt;
+      if (b.wakeTimer <= 0) {
+        b.wakeTimer = 0.12 / Math.min(speed, 3);
+        this.ripples.spawn(b.x - fwx * 1.9, b.z - fwz * 1.9, 0.12, 1.5 + speed * 0.6,
+          1.6, 0.20 + speed * 0.06, 0.35);
+      }
+    }
+
+    // A boat moving overhead puts fish down. This is why you anchor.
+    b.spookTimer -= dt;
+    if (b.aboard && b.spookTimer <= 0) {
+      b.spookTimer = 0.25;
+      if (speed > 0.6) {
+        var amount = M.sat(speed * 0.45);
+        var list = this.shoal.fish;
+        for (var i = 0; i < list.length; i++) {
+          var f = list[i];
+          if (f.state === 'hooked') continue;
+          var dx = f.x - b.x, dz = f.z - b.z;
+          if (dx * dx + dz * dz < 49) f.spooked = Math.max(f.spooked, amount);
+        }
+      }
+    }
+    return speed;
+  };
+  var _mBoat = M4.create();
+
   Game.prototype.updatePlayer = function (dt) {
     var p = this.player, k = this.keys;
+
+    // Aboard: the hull moves, the player just sits in it.
+    if (this.boat.aboard) {
+      var b = this.boat;
+      p.onDock = false;
+      p.wading = 0;
+      p.stepAccum = 0.75;
+      p.bobPhase += dt * 1.1;
+      p.x = b.x; p.z = b.z;
+      // Sit on the aft thwart, high enough to see over the bow and to keep the
+      // rod clear of the gunwale.
+      var seatZ = -A.BOAT_LEN / 2 + 0.72 * A.BOAT_LEN;
+      var sx = -Math.sin(b.heading), sz = -Math.cos(b.heading);
+      var eyeX = b.x - sx * seatZ, eyeZ = b.z - sz * seatZ;
+      p.y = M.damp(p.y, b.y + 1.34, 18, dt);
+
+      var s2 = this.scene;
+      s2.camPos[0] = eyeX;
+      s2.camPos[1] = p.y + Math.sin(p.bobPhase) * 0.006;
+      s2.camPos[2] = eyeZ;
+      var cp2 = Math.cos(p.pitch);
+      s2.forward[0] = -Math.sin(p.yaw) * cp2;
+      s2.forward[1] = Math.sin(p.pitch);
+      s2.forward[2] = -Math.cos(p.yaw) * cp2;
+      // Let the horizon roll a little with the hull. Subtle on purpose.
+      var rollCam = -b.roll * 0.45;
+      var rx2 = Math.cos(p.yaw), rz2 = -Math.sin(p.yaw);
+      s2.up[0] = M.damp(s2.up[0], rx2 * Math.sin(rollCam), 8, dt);
+      s2.up[1] = Math.cos(rollCam);
+      s2.up[2] = M.damp(s2.up[2], rz2 * Math.sin(rollCam), 8, dt);
+      s2.underwater = M.damp(s2.underwater, 0, 10, dt);
+      return;
+    }
+
+    this.scene.up[0] = M.damp(this.scene.up[0], 0, 10, dt);
+    this.scene.up[1] = 1;
+    this.scene.up[2] = M.damp(this.scene.up[2], 0, 10, dt);
+
     var fwd = (k['w'] || k['arrowup'] ? 1 : 0) - (k['s'] || k['arrowdown'] ? 1 : 0);
     var strafe = (k['d'] || k['arrowright'] ? 1 : 0) - (k['a'] || k['arrowleft'] ? 1 : 0);
     var sprint = (k['shift'] ? 1 : 0);
 
-    var moving = (fwd !== 0 || strafe !== 0) && !this.paused;
+    var moving = (fwd !== 0 || strafe !== 0);
     var speed = (3.3 + sprint * 2.9) * (1 - p.wading * 0.55);
     if (this.mode === 'fighting') speed *= 0.5;
 
@@ -744,10 +1032,33 @@
   var _m = M4.create(), _m2 = M4.create();
   // Viewmodel scale: a real 2.4 m rod fills the whole screen at arm's length.
   var ROD_SCALE = 0.82;
+  /* Camera-to-world built straight from the scene camera. Deriving it here
+     rather than borrowing the renderer's copy keeps the rod exact even on a
+     frame that never drew (headless sim, or a stalled tab). */
+  var _camToWorld = M4.create();
+  function cameraBasis(out, eye, fwd, up) {
+    var fx = fwd[0], fy = fwd[1], fz = fwd[2];
+    var fl = Math.hypot(fx, fy, fz) || 1;
+    fx /= fl; fy /= fl; fz /= fl;
+    var rx = fy * up[2] - fz * up[1];
+    var ry = fz * up[0] - fx * up[2];
+    var rz = fx * up[1] - fy * up[0];
+    var rl = Math.hypot(rx, ry, rz);
+    if (rl < 1e-5) { rx = 1; ry = 0; rz = 0; rl = 1; }
+    rx /= rl; ry /= rl; rz /= rl;
+    var ux = ry * fz - rz * fy;
+    var uy = rz * fx - rx * fz;
+    var uz = rx * fy - ry * fx;
+    out[0] = rx; out[1] = ry; out[2] = rz; out[3] = 0;
+    out[4] = -ux; out[5] = -uy; out[6] = -uz; out[7] = 0;
+    out[8] = -fx; out[9] = -fy; out[10] = -fz; out[11] = 0;
+    out[12] = eye[0]; out[13] = eye[1]; out[14] = eye[2]; out[15] = 1;
+    return out;
+  }
+
   Game.prototype.updateRod = function (dt) {
     var s = this.scene, p = this.player;
-    var r = this.renderer;
-    var cw = r.camToWorld;
+    var cw = cameraBasis(_camToWorld, s.camPos, s.forward, s.up);
 
     this.castAnim = Math.max(0, this.castAnim - dt * 3.4);
     var charge = this.mode === 'charging' ? M.sat(this.castPower) : 0;
@@ -1120,6 +1431,7 @@
     s.waveTime = this.time;
 
     this.updateEnvironment(dt);
+    this.boatSpeed = this.updateBoat(dt);
     this.updatePlayer(dt);
     this.updateRod(dt);
 
@@ -1185,7 +1497,13 @@
     this._hudAt = this.time;
     var st = this.state;
     var hint = '';
-    if (this.mode === 'idle') hint = 'Hold [Left Click] to charge a cast';
+    if (this.boat.aboard && this.mode === 'idle') {
+      hint = this.boat.anchored
+        ? 'Hold [Left Click] to cast  ·  [Q] weigh anchor  ·  [E] step out'
+        : '[W A S D] row  ·  [Q] drop anchor to fish steady  ·  [E] step out';
+    } else if (!this.boat.aboard && this.boatDistance() < 3.6 && this.mode === 'idle') {
+      hint = '[E] board the boat  ·  hold [Left Click] to cast';
+    } else if (this.mode === 'idle') hint = 'Hold [Left Click] to charge a cast';
     else if (this.mode === 'charging') hint = 'Release to cast';
     else if (this.mode === 'flying') hint = '…';
     else if (this.mode === 'fishing') hint = 'Wait for a bite  ·  [Left Click] retrieve  ·  [R] reel in';
@@ -1198,6 +1516,10 @@
       weather: WEATHERS[this.weatherName],
       lure: this.lure(), rod: this.rod(),
       depth: this.tackle.active ? this.world.depthAt(this.tackle.lureX, this.tackle.lureZ) : 0,
+      boat: this.boat.aboard,
+      anchored: this.boat.anchored,
+      boatDepth: this.boat.aboard ? this.world.depthAt(this.boat.x, this.boat.z) : 0,
+      nearBoat: !this.boat.aboard && this.boatDistance() < 3.6,
       castDist: this.tackle.state !== 'idle'
         ? Math.hypot(this.tackle.x - this.player.x, this.tackle.z - this.player.z) : 0,
       hint: hint,
@@ -1238,6 +1560,8 @@
   /*  PERSISTENCE                                                           */
   /* ====================================================================== */
   Game.prototype.save = function () {
+    var b = this.boat;
+    this.state.boat = { x: b.x, z: b.z, heading: b.heading, anchored: b.anchored };
     try {
       localStorage.setItem(SAVE_KEY, JSON.stringify(this.state));
     } catch (e) { /* private mode, quota — not worth interrupting play */ }

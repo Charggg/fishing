@@ -28,7 +28,7 @@
       'loading', 'load-fill', 'load-step', 'start', 'btn-play', 'hud', 'crosshair',
       'clock-time', 'clock-day', 'clock-ic', 'weather-ic', 'weather-name', 'money',
       'level', 'xp', 'dex', 'lurebar', 'hint', 'rig-rod', 'rig-lure', 'rig-depth',
-      'rig-dist', 'cast-meter', 'cm-fill', 'prompt', 'fight', 'fight-name',
+      'rig-dist', 'rig-boat', 'rig-boat-row', 'cast-meter', 'cm-fill', 'prompt', 'fight', 'fight-name',
       'fight-phase', 'fb-tension', 'fb-stamina', 'fb-line', 'fb-dist', 'fb-drag',
       'toasts', 'catch', 'catch-banner', 'catch-art', 'catch-name', 'catch-latin',
       'catch-weight', 'catch-length', 'catch-value', 'catch-grade',
@@ -191,6 +191,13 @@
     if (d.lure.id !== last.lure) { e['rig-lure'].textContent = d.lure.name; this.refreshLureBar(); }
     e['rig-depth'].textContent = d.depth > 0.05 ? d.depth.toFixed(1) + ' m deep' : '—';
     e['rig-dist'].textContent = d.castDist > 0.5 ? d.castDist.toFixed(1) + ' m out' : '—';
+    if (e['rig-boat-row']) {
+      e['rig-boat-row'].classList.toggle('hidden', !d.boat);
+      if (d.boat) {
+        e['rig-boat'].textContent = (d.anchored ? '⚓ ' : '🚣 ') + d.boatDepth.toFixed(1) + ' m under';
+        e['rig-boat'].style.color = d.anchored ? 'var(--accent)' : 'var(--ink)';
+      }
+    }
     if (d.hint !== last.hint) e.hint.textContent = d.hint;
 
     this.lastHUD = {

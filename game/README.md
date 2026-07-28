@@ -182,3 +182,18 @@ Erasing your save is in the pause menu, or `localStorage.clear()`.
 If it runs slowly, drop the graphics setting in **Esc → Graphics**. The
 expensive parts, in order, are the reflection pass, the water grid density, and
 bloom.
+
+---
+
+## 🚣 The boat
+
+A rowboat is moored beside the dock. `E` to board, `WASD` to row, `Q` to drop
+the anchor, `E` again to step out onto anything solid within reach.
+
+It has real momentum — pulse thrust on each oar stroke, water drag, and a wind
+that pushes you off your spot if you don't anchor. Rowing over fish spooks
+them for a while, so arrive quietly and drop the hook before you cast.
+
+This matters more than it sounds: the deep hole and the weed flat that the
+whole depth-and-species system is built around sit well beyond casting range
+of the dock. Until you take the boat out, most of the lake is theoretical.

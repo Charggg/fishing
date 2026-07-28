@@ -64,6 +64,9 @@ will destroy you unless you back the drag off and only wind when it gives.
 | `Wheel` | change lure — or adjust drag mid-fight |
 | `1`…`7` / `F` | pick lure |
 | `R` | reel in |
+| `E` / `Q` | board the rowboat · drop anchor |
+| `M` / `C` | lake chart · commissions |
+| `G` | sounder (once you own one) |
 | `Tab` | field journal |
 | `B` | tackle shop (also: wait for a better hour) |
 | `H` | how to fish |
@@ -197,3 +200,19 @@ them for a while, so arrive quietly and drop the hook before you cast.
 This matters more than it sounds: the deep hole and the weed flat that the
 whole depth-and-species system is built around sit well beyond casting range
 of the dock. Until you take the boat out, most of the lake is theoretical.
+
+---
+
+## 📡 The sounder
+
+$2,600 in the shop's **Gear** tab buys a Loon Mk II. It clamps to the transom,
+so it only reads while you are aboard the boat, and `G` switches it on and off.
+
+It draws the way a real sounder does: newest ping at the right edge, history
+scrolling away to the left. You get the bottom contour, the hard bottom
+return, a depth grid, and marks for anything inside the transducer cone —
+brightness is return strength, width is size. A fish holding under the hull
+paints a long band; one crossing the cone leaves a short one.
+
+It is the difference between knowing the lake is 30 m deep somewhere and
+watching the bottom fall away underneath you as you row over the edge of it.

@@ -143,6 +143,26 @@ const SESSIONS = parseInt(process.argv[2] || '3', 10);
         }
       }
 
+      /* Sonar. The ping buffer is unbounded-looking (it just pushes), so the
+         cap is worth asserting: this runs every frame for an entire session
+         and a leak here would be invisible until it ate the tab. */
+      const sn = g.sonar, gear = DC.Species.gearById.sonar;
+      if (sn.pings.length > gear.cols) {
+        fail(tag + ': sonar buffer overflow, ' + sn.pings.length + ' > ' + gear.cols);
+      }
+      if (!g.hasSonar() && sn.pings.length) {
+        fail(tag + ': sonar pinged without a sounder aboard');
+      }
+      for (let pi = sn.pings.length - 1; pi >= 0 && pi > sn.pings.length - 3; pi--) {
+        const pg = sn.pings[pi];
+        if (!finite(pg.depth) || pg.depth < 0) fail(tag + ': sonar depth bad: ' + pg.depth);
+        for (const mk of pg.marks) {
+          if (!finite(mk.d) || !finite(mk.gain)) fail(tag + ': sonar mark not finite');
+          if (mk.gain < 0 || mk.gain > 1) fail(tag + ': sonar gain out of range ' + mk.gain);
+          if (mk.d < -0.5) fail(tag + ': sonar mark above the surface: ' + mk.d);
+        }
+      }
+
       if (g.particles.n > g.particles.max) fail(tag + ': particle pool overflow');
       if (g.ripples.n > g.ripples.max) fail(tag + ': ripple pool overflow');
       maxParticles = Math.max(maxParticles, g.particles.n);
@@ -253,6 +273,10 @@ const SESSIONS = parseInt(process.argv[2] || '3', 10);
         g.boatDistance().toFixed(1) + ' m away');
       g.toggleBoat();
       if (!g.boat.aboard) fail('boat: could not board from the dock');
+
+      // Fit the sounder so the ping path is exercised for the whole boat run.
+      g.state.gear = ['sonar'];
+      g.sonar.on = true;
 
       // Row around the lake in several directions, anchoring at random.
       for (let leg = 0; leg < 8; leg++) {

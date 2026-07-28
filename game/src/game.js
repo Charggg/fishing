@@ -95,6 +95,15 @@
       matrix: M4.create(), oarL: M4.create(), oarR: M4.create()
     };
 
+    /* Fish finder. A ring buffer of pings, newest last, each holding the
+       bottom depth under the hull and whatever was inside the transducer cone
+       at that instant. The display is a pure function of this buffer, so the
+       trace survives opening a panel or a dropped frame. */
+    this.sonar = {
+      on: true, pings: [], t: 0, cols: 0,
+      lastDepth: 0, lastMarks: 0, dirty: true
+    };
+
     this.scene = {
       camPos: new Float32Array(3),
       forward: new Float32Array(3),
@@ -139,7 +148,7 @@
       seed: 20260727,
       money: 150, xp: 0,
       rod: 'starter', lure: 'worm',
-      rods: ['starter'], lures: ['worm'],
+      rods: ['starter'], lures: ['worm'], gear: [],
       records: {}, caught: {},
       totalCatches: 0, totalWeight: 0, casts: 0, breaks: 0, escapes: 0,
       hour: 5.6, day: 1,
@@ -400,6 +409,7 @@
       if (idx < owned.length) this.selectLure(owned[idx].id);
       return;
     }
+    if (k === 'g') { this.toggleSonar(); return; }
     if (k === 'm') { this.ui.toggleMap(); return; }
     if (k === 'c') { this.ui.toggleQuests(); return; }
     if (k === 'p') { this.ui.toggleStats(); return; }
@@ -1671,6 +1681,7 @@
     } : null;
     this.shoal.update(dt, { lure: lureCtx });
 
+    this.updateSonar(dt);
     this.particles.update(dt);
     this.ripples.update(dt);
     this.buildLine();
@@ -1753,6 +1764,7 @@
       caught: Object.keys(st.caught).length,
       total: Sp.SPECIES.length
     });
+    this.ui.renderSonar();
   };
 
   Game.prototype.draw = function () {
@@ -1818,11 +1830,17 @@
   /* ====================================================================== */
   Game.prototype.buy = function (kind, id) {
     var st = this.state;
-    var item = kind === 'rod' ? Sp.rodById[id] : Sp.lureById[id];
+    var item = kind === 'rod' ? Sp.rodById[id]
+      : kind === 'gear' ? Sp.gearById[id] : Sp.lureById[id];
     if (!item) return false;
-    var list = kind === 'rod' ? st.rods : st.lures;
+    // `gear` post-dates the first saves; load() backfills it, but buying is
+    // reachable from a panel and is not worth a crash if that ever slips.
+    if (kind === 'gear' && !st.gear) st.gear = [];
+    var list = kind === 'rod' ? st.rods : kind === 'gear' ? st.gear : st.lures;
     if (list.indexOf(id) >= 0) {
-      if (kind === 'rod') st.rod = id; else this.selectLure(id);
+      // Gear is not equippable — owning it is the whole effect.
+      if (kind === 'rod') st.rod = id;
+      else if (kind === 'lure') this.selectLure(id);
       this.audio.ui(true);
       this.save();
       return true;
@@ -1830,10 +1848,87 @@
     if (st.money < item.cost) { this.audio.deny(); return false; }
     st.money -= item.cost;
     list.push(id);
-    if (kind === 'rod') st.rod = id; else st.lure = id;
+    if (kind === 'rod') st.rod = id;
+    else if (kind === 'lure') st.lure = id;
     this.audio.buy();
     this.save();
     return true;
+  };
+
+  /* ====================================================================== */
+  /*  SONAR                                                                 */
+  /* ====================================================================== */
+  Game.prototype.hasSonar = function () {
+    return (this.state.gear || []).indexOf('sonar') >= 0;
+  };
+  /* Live only from the boat — the transducer is clamped to the transom. On the
+     dock the unit is in the bottom of the boat, and it says so. */
+  Game.prototype.sonarLive = function () {
+    return this.hasSonar() && this.sonar.on && this.boat.aboard;
+  };
+
+  Game.prototype.updateSonar = function (dt) {
+    var sn = this.sonar;
+    if (!this.hasSonar()) {
+      // No unit, no trace. Leaving stale pings around would also let them
+      // outlive a save reset.
+      if (sn.pings.length) { sn.pings.length = 0; sn.cols = 0; sn.dirty = true; }
+      sn.t = 0;
+      return;
+    }
+    if (!this.sonarLive()) {
+      // Hold the last trace rather than clearing it: coming back aboard to a
+      // blank screen reads as a broken unit.
+      sn.t = 0;
+      return;
+    }
+    var gear = Sp.gearById.sonar;
+    sn.t += dt;
+    if (sn.t < gear.ping) return;
+    sn.t -= gear.ping;
+
+    var b = this.boat;
+    var depth = this.world.depthAt(b.x, b.z);
+    var marks = [];
+    var list = this.shoal.fish;
+    var r2 = gear.range * gear.range;
+    for (var i = 0; i < list.length; i++) {
+      var f = list[i];
+      var dx = f.x - b.x, dz = f.z - b.z;
+      var d2 = dx * dx + dz * dz;
+      if (d2 > r2) continue;
+      /* Return strength: bigger fish and fish nearer the centre of the cone
+         paint brighter, which is what makes reading the screen a skill rather
+         than a fish counter. */
+      var edge = 1 - Math.sqrt(d2) / gear.range;
+      marks.push({
+        d: -f.y,
+        size: f.len,
+        gain: M.sat(edge * 0.75 + M.sat(f.kg / 6) * 0.45)
+      });
+    }
+    // Deepest first, so the display draws big deep marks behind small shallow.
+    marks.sort(function (a, c) { return c.d - a.d; });
+    if (marks.length > 12) marks.length = 12;
+
+    sn.pings.push({ depth: depth, marks: marks, spot: this.currentSpot ? 1 : 0 });
+    if (sn.pings.length > gear.cols) sn.pings.splice(0, sn.pings.length - gear.cols);
+    sn.cols = sn.pings.length;
+    sn.lastDepth = depth;
+    sn.lastMarks = marks.length;
+    sn.dirty = true;
+  };
+
+  Game.prototype.toggleSonar = function () {
+    if (!this.hasSonar()) {
+      this.ui.showToast('No sounder aboard — buy one in the shop [B].', 'warn');
+      this.audio.deny();
+      return;
+    }
+    this.sonar.on = !this.sonar.on;
+    this.ui.setSonarVisible(this.sonar.on);
+    this.ui.showToast(this.sonar.on ? 'Sounder on.' : 'Sounder off.', 'good');
+    this.audio.ui(true);
   };
 
   Game.prototype.rest = function (targetHour) {

@@ -88,6 +88,17 @@
 
   <div id="prompt" class="hidden"></div>
 
+  <!-- ---------------------------- SONAR ---------------------------- -->
+  <div id="sonar" class="hidden">
+    <div class="sn-head">
+      <span class="sn-dot" id="sn-dot"></span>
+      <b>SOUNDER</b>
+      <i id="sn-depth">—</i>
+    </div>
+    <canvas id="sonar-canvas" width="264" height="150"></canvas>
+    <div class="sn-foot" id="sn-foot">stow the oars and drift</div>
+  </div>
+
   <!-- ---------------------------- FIGHT ---------------------------- -->
   <div id="fight" class="hidden">
     <div class="fight-head"><b id="fight-name">Fish</b><span id="fight-phase">holding</span></div>
@@ -148,6 +159,7 @@
     <div class="shop-tabs">
       <button class="tab active" data-tab="lures">Lures</button>
       <button class="tab" data-tab="rods">Rods</button>
+      <button class="tab" data-tab="gear">Gear</button>
       <button class="tab" data-tab="rest">Wait</button>
     </div>
     <div class="shop-body" id="shop-body"></div>
@@ -238,7 +250,7 @@
         <div><kbd>1</kbd>…<kbd>7</kbd> pick lure</div><div><kbd>F</kbd> next lure</div>
         <div><kbd>R</kbd> reel in</div><div><kbd>E</kbd> board / leave boat</div>
         <div><kbd>Q</kbd> anchor</div><div><kbd>M</kbd> lake chart</div>
-        <div><kbd>C</kbd> commissions</div>
+        <div><kbd>C</kbd> commissions</div><div><kbd>G</kbd> sounder</div>
         <div><kbd>Tab</kbd> journal</div>
         <div><kbd>B</kbd> shop</div><div><kbd>P</kbd> stats</div>
         <div><kbd>H</kbd> this screen</div><div><kbd>Esc</kbd> pause</div>

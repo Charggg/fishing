@@ -30,6 +30,7 @@
       'level', 'xp', 'dex', 'lurebar', 'hint', 'rig-rod', 'rig-lure', 'rig-depth',
       'rig-dist', 'rig-boat', 'rig-boat-row', 'rig-spot', 'rig-spot-row', 'spots',
       'map', 'map-canvas', 'map-found', 'map-list', 'map-legend',
+      'sonar', 'sonar-canvas', 'sn-dot', 'sn-depth', 'sn-foot',
       'commission', 'cm-title', 'cm-count', 'cm-goal', 'cm-bar',
       'quests', 'q-count', 'q-body',
       'cast-meter', 'cm-fill', 'prompt', 'fight', 'fight-name',
@@ -767,6 +768,142 @@
     return cv;
   };
 
+  /* ---------------------------------------------------------------- sonar */
+  /* A right-to-left waterfall, the way a real sounder draws: newest ping at
+     the right edge, history scrolling off to the left. Everything here is
+     derived from game.sonar.pings, so the trace is stable across dropped
+     frames and paused panels — it advances on pings, not on repaints. */
+  UI.prototype.setSonarVisible = function (v) {
+    var el = this.el['sonar'];
+    if (el) el.classList.toggle('hidden', !v);
+  };
+
+  UI.prototype.renderSonar = function () {
+    var g = this.game;
+    var el = this.el['sonar'];
+    if (!el) return;
+    var owned = g.hasSonar();
+    // The panel exists only once you own the unit, and only while it is on.
+    if (!owned || !g.sonar.on) { el.classList.add('hidden'); return; }
+    el.classList.remove('hidden');
+
+    var live = g.sonarLive();
+    var sn = g.sonar, gear = Sp.gearById.sonar;
+    // Diffed like the rest of the HUD — this runs every frame.
+    var last = this._sn || (this._sn = {});
+    if (last.live !== live) {
+      this.el['sn-dot'].className = 'sn-dot' + (live ? ' live' : '');
+      last.live = live;
+    }
+    var depthTxt = live && sn.lastDepth > 0.05 ? sn.lastDepth.toFixed(1) + ' m' : '—';
+    if (last.depth !== depthTxt) { this.el['sn-depth'].textContent = depthTxt; last.depth = depthTxt; }
+    var footTxt;
+    if (!g.boat.aboard) footTxt = 'transducer is on the transom — board the boat';
+    else if (g.currentSpot) footTxt = g.currentSpot.icon + ' ' + g.currentSpot.name;
+    else footTxt = sn.lastMarks
+      ? sn.lastMarks + (sn.lastMarks === 1 ? ' return' : ' returns') + ' in the cone'
+      : 'open water';
+    if (last.foot !== footTxt) { this.el['sn-foot'].textContent = footTxt; last.foot = footTxt; }
+
+    // Only repaint when a new ping landed, or when the live state flipped.
+    if (!sn.dirty && this._snLive === live) return;
+    sn.dirty = false;
+    this._snLive = live;
+
+    var cv = this.el['sonar-canvas'];
+    var ctx = cv.getContext('2d');
+    var W = cv.width, H = cv.height;
+    var span = gear.span;
+    var yOf = function (d) { return M.sat(d / span) * H; };
+
+    ctx.clearRect(0, 0, W, H);
+    var bg = ctx.createLinearGradient(0, 0, 0, H);
+    bg.addColorStop(0, '#04131a');
+    bg.addColorStop(1, '#020a0e');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, W, H);
+
+    // Depth grid every 5 m.
+    ctx.font = '9px ui-monospace, monospace';
+    ctx.textBaseline = 'top';
+    for (var d = 5; d < span; d += 5) {
+      var gy = Math.round(yOf(d)) + 0.5;
+      ctx.strokeStyle = 'rgba(90,190,180,0.13)';
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(W, gy); ctx.stroke();
+      ctx.fillStyle = 'rgba(120,210,200,0.42)';
+      ctx.fillText(d + 'm', 3, gy + 2);
+    }
+
+    var pings = sn.pings, n = pings.length;
+    if (n) {
+      var colW = W / gear.cols;
+      // Right-align: the newest ping owns the right edge, history runs left.
+      var x0 = W - n * colW;
+
+      // Bottom, drawn as one filled path so it reads as terrain, not bars.
+      ctx.beginPath();
+      ctx.moveTo(x0, H);
+      for (var i = 0; i < n; i++) ctx.lineTo(x0 + i * colW + colW * 0.5, yOf(pings[i].depth));
+      ctx.lineTo(W, H);
+      ctx.closePath();
+      var bd = ctx.createLinearGradient(0, 0, 0, H);
+      bd.addColorStop(0, 'rgba(196,122,44,0.92)');
+      bd.addColorStop(1, 'rgba(120,58,18,0.92)');
+      ctx.fillStyle = bd;
+      ctx.fill();
+
+      // Hard bottom return: the bright line every sounder paints.
+      ctx.beginPath();
+      for (var j = 0; j < n; j++) {
+        var bx = x0 + j * colW + colW * 0.5, by = yOf(pings[j].depth);
+        if (j === 0) ctx.moveTo(bx, by); else ctx.lineTo(bx, by);
+      }
+      ctx.strokeStyle = 'rgba(255,214,130,0.95)';
+      ctx.lineWidth = 1.6;
+      ctx.stroke();
+
+      /* Fish arches. A real sounder draws an arch because the fish enters and
+         leaves the cone at an angle; here the width stands in for size and the
+         brightness for return strength. */
+      for (var k = 0; k < n; k++) {
+        var p = pings[k], mx = x0 + k * colW + colW * 0.5;
+        var age = k / Math.max(n - 1, 1);          // older pings fade
+        for (var mi = 0; mi < p.marks.length; mi++) {
+          var m = p.marks[mi];
+          var my = yOf(m.d);
+          if (my >= H - 1) continue;                // buried in the bottom
+          var rad = 1.7 + M.sat(m.size / 0.9) * 4.3;
+          var a = (0.48 + m.gain * 0.52) * (0.55 + age * 0.45);
+          ctx.strokeStyle = m.size > 0.45
+            ? 'rgba(255,238,140,' + a.toFixed(3) + ')'
+            : 'rgba(150,255,190,' + a.toFixed(3) + ')';
+          ctx.lineWidth = 1.4 + M.sat(m.size / 0.8) * 1.9;
+          ctx.beginPath();
+          ctx.arc(mx, my + rad * 0.55, rad, Math.PI * 1.15, Math.PI * 1.85);
+          ctx.stroke();
+        }
+      }
+    }
+
+    // Surface line and the leading edge.
+    ctx.strokeStyle = 'rgba(150,230,255,0.5)';
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(0, 0.5); ctx.lineTo(W, 0.5); ctx.stroke();
+    if (live) {
+      ctx.strokeStyle = 'rgba(140,255,210,0.55)';
+      ctx.beginPath(); ctx.moveTo(W - 0.5, 0); ctx.lineTo(W - 0.5, H); ctx.stroke();
+    } else {
+      ctx.fillStyle = 'rgba(2,10,14,0.55)';
+      ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = 'rgba(150,210,205,0.72)';
+      ctx.font = '10px ui-monospace, monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('STANDBY', W / 2, H / 2 - 5);
+      ctx.textAlign = 'left';
+    }
+  };
+
   UI.prototype.renderMap = function () {
     var g = this.game;
     if (!g.spots) return;
@@ -982,20 +1119,25 @@
       return;
     }
 
-    var isRod = this.shopTab === 'rods';
-    var items = isRod ? Sp.RODS : Sp.LURES;
-    var owned = isRod ? st.rods : st.lures;
-    var equipped = isRod ? st.rod : st.lure;
+    var tab = this.shopTab;
+    var isRod = tab === 'rods', isGear = tab === 'gear';
+    var kind = isRod ? 'rod' : isGear ? 'gear' : 'lure';
+    var items = isRod ? Sp.RODS : isGear ? Sp.GEAR : Sp.LURES;
+    var owned = isRod ? st.rods : isGear ? (st.gear || []) : st.lures;
+    var equipped = isRod ? st.rod : isGear ? null : st.lure;
 
     items.forEach(function (item) {
       var has = owned.indexOf(item.id) >= 0;
-      var isEq = equipped === item.id;
+      // Gear is never "equipped": buying it is the whole transaction.
+      var isEq = !isGear && equipped === item.id;
       var row = document.createElement('div');
       row.className = 'shop-item' + (isEq ? ' equipped' : (has ? ' owned' : ''));
       var stats = isRod
         ? 'line ×' + item.line.toFixed(2) + '   reel ×' + item.reel.toFixed(2) +
         '   cast ×' + item.cast.toFixed(2) + '   feel ×' + item.sens.toFixed(2)
-        : 'depth ' + item.depth.toFixed(1) + ' m   reach ' + item.radius + ' m   patience ×' +
+        : isGear
+          ? 'cone ' + item.range.toFixed(1) + ' m   range ' + item.span + ' m   [G] to toggle'
+          : 'depth ' + item.depth.toFixed(1) + ' m   reach ' + item.radius + ' m   patience ×' +
           item.patience.toFixed(2) + '   splash ' + (
             item.noise < 0.25 ? 'silent' : item.noise < 0.5 ? 'quiet' :
               item.noise < 0.7 ? 'loud' : 'very loud');
@@ -1006,12 +1148,12 @@
         '<div class="shop-stats">' + stats + '</div></div>';
       var b = document.createElement('button');
       if (isEq) { b.className = 'shop-buy equipped'; b.textContent = 'Equipped'; }
-      else if (has) { b.className = 'shop-buy owned'; b.textContent = 'Equip'; }
+      else if (has) { b.className = 'shop-buy owned'; b.textContent = isGear ? 'Owned' : 'Equip'; }
       else if (st.money < item.cost) { b.className = 'shop-buy cant'; b.textContent = F.money(item.cost); }
       else { b.className = 'shop-buy'; b.textContent = F.money(item.cost); }
       b.addEventListener('click', function () {
-        if (isEq) return;
-        if (game.buy(isRod ? 'rod' : 'lure', item.id)) {
+        if (isEq || (isGear && has)) return;
+        if (game.buy(kind, item.id)) {
           self.renderShop();
           self.refreshLureBar();
           self.showToast((has ? 'Equipped ' : 'Bought ') + item.name, 'good');

@@ -17,6 +17,7 @@ QA harness clean. It is not yet *massive* or *addictive* — that is the job.
 | Render smoke | `node game/qa/render-smoke.js` | Real boot, real clicks, all quality presets, save/reload, resize. Catches GL and DOM errors the sim harness can't. |
 | Screenshots | `node game/qa/shots.js` | Eyes on it. Software rendering, so ignore the FPS numbers. |
 | Spot balance | `node game/qa/spotbias.js` | Fishes every spot and tallies the species. A tuning instrument, not a gate. |
+| **Everything** | `node game/qa/all.js` | Runs the whole suite and prints a scorecard. `--quick` for a ~3 min pass. Use this before saying done. |
 | Quest chain | `node game/qa/questplay.js` | A bot that reads the chart and plays the commission chain. Proves it is completable. |
 | Viewmodel | `node game/qa/viewmodel.js --probe` | Measures where the rod, hands and forearms land on screen across a whole crank revolution. Exits non-zero. Drop `--probe` to also render the rod with pieces suppressed one at a time. |
 | Crop | `node game/qa/crop.js <png> <x> <y> <w> <h> [zoom]` | Zooms into a screenshot. There is no image library here, so it borrows the browser's canvas. |
@@ -150,9 +151,16 @@ Ordered by how much each one changes the experience, not by how hard it is.
    spots, lures, the boat, the chart, the clock, deep water, the fight, weather,
    patience, gear, and finally the Moonfin. `C` opens the list; the active one
    is pinned to the HUD. Two of them unlock a lure.
-4. **Sonar / fish finder.** A purchasable item that draws a depth-and-fish
-   readout for the water in front of you. Turns blind casting into reading
-   water. Pairs with the boat.
+4. **✅ Sonar / fish finder.** *(done 2026-07-28)* The Loon Mk II, $2,600 in the
+   new shop **Gear** tab. Works from the boat only — the transducer is on the
+   transom — and draws a real right-to-left waterfall: bottom contour, hard
+   bottom return, depth grid, and fish marks whose brightness is return
+   strength and whose width is fish size. `G` toggles it. It advances on pings
+   (0.16 s), not on frames, so the trace survives a dropped frame or an open
+   panel, and it is the first thing in the game that makes the *depth* system
+   perceivable while you are still deciding where to cast.
+
+**Tier 1 is now complete.**
 
 ### Tier 2 — depth and replay value
 5. **Structure that actually holds fish.** Sunken logs, weed beds, rock piles
@@ -268,6 +276,21 @@ viewmodel upside down. I had visually signed off on that rod twice.
 - Verified: harness 2 sessions ✓, render smoke ✓, questplay 12/12 ✓,
   viewmodel probe ✓, seven screenshots reviewed by eye.
 
+### 2026-07-28 — Session 6 (autonomous)
+- **Sonar.** Tier 1 item 4, which closes Tier 1. New shop tab (Gear), a
+  $2,600 sounder, `G` to toggle, bottom-left waterfall display. Deliberate
+  choices: it pings on a timer rather than per frame (so the trace is stable
+  across dropped frames and open panels), the buffer is the single source of
+  truth for the display, and it is boat-only — which gives the boat a second
+  reason to exist and the shop a non-linear purchase.
+- `qa/all.js`: one command for the whole suite plus a scorecard. `--quick`
+  runs in ~3 min.
+- `REVIEW.md`: a grading kit for a cold session — a paste-in prompt, how to
+  run everything, and an honest list of what has never been verified (real-GPU
+  framerate, audio, and anything about feel).
+- Harness now fits the sounder before the boat run and asserts the ping buffer
+  is capped, marks are finite and in range, and nothing pings without a unit.
+
 ### 2026-07-28 — Session 1
 - Built the game: renderer, world, fish AI, fight sim, audio, UI, saves.
 
@@ -275,15 +298,13 @@ viewmodel upside down. I had visually signed off on that rod twice.
 
 ## Next session: start here
 
-Two things, in this order.
+**All of Tier 1 is now complete.** The lake has places worth going, gear worth
+buying, a thread that asks something of you, and an instrument that makes the
+water readable. Every remaining gap is presentation, not systems — the
+simulation already models far more than the player can perceive, and that gap
+is now the whole problem.
 
-**Tier 1 is done.** The lake has places worth going, gear worth buying, and a
-thread that asks something of you. The remaining structural item is **sonar**
-(Tier 1 item 4): a purchasable fish finder that draws depth and returns for
-the water in front of the boat. It would turn reading water from a lookup in
-a menu into an active skill, and it pairs directly with the boat and chart.
-
-After that the highest-value work is presentation, not systems:
+In order:
 - **The fight camera.** All the drama of a fight is currently in a HUD bar.
   Pull the camera back and orbit on a hookup so the player can *see* the fish.
   This is the single biggest gap between how the game plays and how it feels.

@@ -238,8 +238,22 @@
     s.value = RARITY[s.rarity].value;
     BY_ID[s.id] = s;
   });
+  /* Boat gear. Bought once, never equipped or swapped — owning it is the whole
+     effect. `range` is the transducer cone radius in metres; `span` is how many
+     metres of depth the display covers before it clips. */
+  var GEAR = [
+    {
+      id: 'sonar', name: 'Loon Mk II Sounder', cost: 2600, icon: '📡',
+      range: 9.0, span: 34, ping: 0.16, cols: 132,
+      desc: 'A transducer clamped to the transom and a little green screen. ' +
+        'Shows the bottom under the boat and anything swimming over it.',
+      note: 'Works from the boat only.'
+    }
+  ];
+
   var LURE_BY_ID = {}; LURES.forEach(function (l) { LURE_BY_ID[l.id] = l; });
   var ROD_BY_ID = {}; RODS.forEach(function (r) { ROD_BY_ID[r.id] = r; });
+  var GEAR_BY_ID = {}; GEAR.forEach(function (g) { GEAR_BY_ID[g.id] = g; });
 
   /**
    * How likely is this species to show interest right now?
@@ -296,8 +310,8 @@
   }
 
   DC.Species = {
-    RARITY: RARITY, LURES: LURES, RODS: RODS, SPECIES: SPECIES,
-    byId: BY_ID, lureById: LURE_BY_ID, rodById: ROD_BY_ID,
+    RARITY: RARITY, LURES: LURES, RODS: RODS, GEAR: GEAR, SPECIES: SPECIES,
+    byId: BY_ID, lureById: LURE_BY_ID, rodById: ROD_BY_ID, gearById: GEAR_BY_ID,
     actAt: actAt, appeal: appeal, rollWeight: rollWeight,
     lengthFor: lengthFor, valueOf: valueOf, trophyGrade: trophyGrade
   };

@@ -57,7 +57,22 @@ const SHOTS = [
         n++;
       }
     } },
+  { tag: 'sonar', frames: 600, setup: g => {
+      g.state.hour = 10.2; g.player.pitch = -0.10;
+      g.state.gear = ['sonar']; g.sonar.on = true;
+      // Drift across the drop-off so the trace has real structure in it, not
+      // a flat line: a sounder over featureless water proves nothing.
+      const sp = g.spots.find(s => s.id === 'dropoff') || g.spots[0];
+      if (!g.boat.aboard) g.toggleBoat();
+      if (g.boat.anchored) g.toggleAnchor();
+      g.boat.x = sp.x - 26; g.boat.z = sp.z - 26;
+      g.player.x = g.boat.x; g.player.z = g.boat.z;
+      g.boat.heading = Math.atan2(-(sp.x - g.boat.x), -(sp.z - g.boat.z));
+      g.player.yaw = g.boat.heading;
+      g.keys['w'] = true;
+    } },
   { tag: 'boat-night-cast', frames: 200, setup: g => {
+      g.keys['w'] = false;
       g.state.hour = 1.4; g.player.pitch = -0.14;
       g.state.lures = ['worm', 'glow']; g.state.lure = 'glow';
       g.mode = 'idle'; g.tackle.state = 'idle';

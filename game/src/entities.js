@@ -123,9 +123,19 @@
     this.instParam = new Float32Array(max * 4);
   }
   Ripples.prototype.spawn = function (x, z, r0, r1, life, alpha, width) {
-    if (this.n >= this.max) this.n--;
-    this.data[this.n] = { x: x, z: z, r0: r0, r1: r1, t: 0, life: life, alpha: alpha, width: width || 0.28 };
-    this.n++;
+    var i;
+    if (this.n < this.max) {
+      i = this.n++;
+    } else {
+      // Pool full: retire the oldest, not the one we are about to add.
+      var oldest = 0, bestAge = -1;
+      for (var k = 0; k < this.n; k++) {
+        var age = this.data[k].t / this.data[k].life;
+        if (age > bestAge) { bestAge = age; oldest = k; }
+      }
+      i = oldest;
+    }
+    this.data[i] = { x: x, z: z, r0: r0, r1: r1, t: 0, life: life, alpha: alpha, width: width || 0.28 };
   };
   Ripples.prototype.update = function (dt) {
     var i = 0;
@@ -402,7 +412,11 @@
     this.iDorsal[p3] = sp.dorsal[0]; this.iDorsal[p3 + 1] = sp.dorsal[1]; this.iDorsal[p3 + 2] = sp.dorsal[2];
     this.iBelly[p3] = sp.belly[0]; this.iBelly[p3 + 1] = sp.belly[1]; this.iBelly[p3 + 2] = sp.belly[2];
     this.iFin[p4] = sp.fin[0]; this.iFin[p4 + 1] = sp.fin[1]; this.iFin[p4 + 2] = sp.fin[2];
-    this.iFin[p4 + 3] = sp.glow || 0;
+    // Interested fish get a touch of extra light so you can watch one come to
+    // the bait. Subtle enough to read as a flank flash, not a neon sign.
+    var interest = (f.state === 'approach' || f.state === 'inspect' ||
+                    f.state === 'nibble' || f.state === 'strike') ? 0.20 : 0;
+    this.iFin[p4 + 3] = (sp.glow || 0) + interest;
     this.iShape[p3] = sp.body[0]; this.iShape[p3 + 1] = sp.body[1]; this.iShape[p3 + 2] = sp.body[2];
     return n + 1;
   };
@@ -410,7 +424,7 @@
   /* ------------------------------------------------------------------ tackle
      Bobber flight, floating, and the lure position that fish home in on. */
   function Tackle() {
-    this.state = 'idle';      // idle | flying | water | retrieving
+    this.state = 'idle';      // idle | flying | water
     this.x = 0; this.y = 0; this.z = 0;
     this.vx = 0; this.vy = 0; this.vz = 0;
     this.bob = 0;             // extra vertical offset from nibbles
@@ -462,7 +476,7 @@
       return null;
     }
 
-    if (this.state === 'water' || this.state === 'retrieving') {
+    if (this.state === 'water') {
       var s = waveHeight(this.x, this.z, time, waveScale);
       this.bobVel += (-this.bob) * 34 * dt;      // spring back to the surface
       this.bobVel *= Math.exp(-4.5 * dt);

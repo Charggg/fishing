@@ -1170,6 +1170,8 @@
       this.audio.splash(0.8);
       this.splashAt(t.x, t.z, 0.55);
       this.biteTimer = 0.8;
+      // A lure that lands hard clears the timid fish out of the neighbourhood.
+      this.spookNearby(t.x, t.z, lure.noise);
     } else if (ev === 'land') {
       this.mode = 'fishing';
       this.audio.plunk();
@@ -1280,6 +1282,27 @@
       if (st.spots && st.spots[this.spots[i].id]) out.push(this.spots[i]);
     }
     return out;
+  };
+
+  /* Noise. A topwater popper landing on a bluegill's head sends it into the
+     weeds; a pike barely notices. This is the cost that balances the loud,
+     long-reaching lures against the quiet ones. */
+  Game.prototype.spookNearby = function (x, z, noise) {
+    if (!noise || noise <= 0.01) return;
+    var radius = 4 + noise * 10;
+    var list = this.shoal.fish;
+    for (var i = 0; i < list.length; i++) {
+      var f = list[i];
+      if (f.state === 'hooked') continue;
+      var d = Math.hypot(f.x - x, f.z - z);
+      if (d > radius) continue;
+      var bold = M.sat(f.sp.fight.strength / 1.6);
+      var amount = noise * (1 - bold * 0.78) * (1 - d / radius);
+      if (amount > f.spooked) {
+        f.spooked = Math.min(1, amount);
+        if (f.state === 'wander' && amount > 0.5) { f.state = 'flee'; f.timer = 2 + amount * 3; }
+      }
+    }
   };
 
   Game.prototype.acceptChance = function (f) {

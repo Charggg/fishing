@@ -35,6 +35,28 @@ const SHOTS = [
       if (!g.boat.anchored) g.toggleAnchor();
       g.player.yaw = g.boat.heading + 2.2;
     } },
+  { tag: 'fish-view', frames: 120, setup: g => {
+      g.state.hour = 12.0; g.player.pitch = -0.72;
+      const sp = g.spots.find(s => s.id === 'flat') || g.spots[1];
+      if (!g.boat.aboard) g.toggleBoat();
+      if (!g.boat.anchored) g.toggleAnchor();
+      g.boat.x = sp.x; g.boat.z = sp.z;
+      g.player.x = sp.x; g.player.z = sp.z;
+      g.player.yaw = 1.1;
+      g.keys['w'] = false;
+      // Gather a shoal under the boat so the shot has something to show.
+      let n = 0;
+      for (const f of g.shoal.fish) {
+        if (n >= 14) break;
+        const a = n / 14 * Math.PI * 2, r = 2.5 + (n % 5) * 1.4;
+        f.x = sp.x + Math.cos(a) * r;
+        f.z = sp.z + Math.sin(a) * r;
+        f.y = -1.1 - (n % 4) * 0.5;
+        f.tx = f.x; f.tz = f.z; f.ty = f.y;
+        if (n < 3) f.state = 'approach';
+        n++;
+      }
+    } },
   { tag: 'boat-night-cast', frames: 200, setup: g => {
       g.state.hour = 1.4; g.player.pitch = -0.14;
       g.state.lures = ['worm', 'glow']; g.state.lure = 'glow';

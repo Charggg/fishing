@@ -24,19 +24,11 @@ QA harness clean. It is not yet *massive* or *addictive* — that is the job.
 ## 1. Known bugs / debt
 
 ### Open
-- [ ] `Tackle.state === 'retrieving'` is declared but never set — dead branch.
 - [ ] The boat can pass straight through the dock pilings. Needs a cheap
       cylinder collision test against the piling positions.
 - [ ] Row hard into a steep shore and the hull visually clips the bank before
       the depth test stops it. Collision should sample ahead of the bow, not at
       the centre of the boat.
-- [ ] `lure.noise` is defined per-lure and never read. Either wire it into
-      spook mechanics or delete it.
-- [ ] `QUALITY.propDist` is dead config.
-- [ ] `Ripples.spawn` when the pool is full does `this.n--`, silently killing
-      the newest ripple instead of the oldest. Should be a proper ring buffer.
-- [ ] Fish are hard to see under the surface at any distance. Contrast is
-      physically honest and gameplay-hostile.
 - [ ] Crappie are over-represented at every spot. Common + a wide depth band
       + listed in several biases. Consider narrowing their band.
 - [ ] `doCast` reads the rod transform, which is derived from the camera, which
@@ -82,6 +74,20 @@ QA harness clean. It is not yet *massive* or *addictive* — that is the job.
       noisy that appeal barely mattered and whatever species was commonest
       nearby usually won. Replaced with weighted reservoir sampling (A-Res),
       which picks in true proportion to appeal.
+- [x] **2026-07-28** Fish were nearly invisible under the surface. The fish
+      shader applied full absorption for the downward light path on top of the
+      water shader's absorption for the camera path — correct, and unplayable.
+      Weakened the fish half, sharpened the fresnel edge, added a flank flash,
+      and gave a fish that has committed to your lure a slight highlight.
+- [x] **2026-07-28** Every centred HUD element used `position:absolute;
+      left:50%`, which caps an element's shrink-to-fit width at *half* the
+      viewport. The bite prompt had been wrapping onto two lines, and the top
+      bar wrapped to two rows as soon as a sixth chip was added. All of them
+      now span the full width and centre with the layout.
+- [x] **2026-07-28** `Ripples.spawn` on a full pool discarded the newest ripple
+      instead of the oldest. Now retires the oldest.
+- [x] **2026-07-28** Removed dead code: the never-assigned `retrieving` tackle
+      state and the unread `QUALITY.propDist`.
 
 ---
 
@@ -171,6 +177,11 @@ Ordered by how much each one changes the experience, not by how hard it is.
 - Fixed the deep-water bite bug and the species-selection noise (see above).
 - Added `qa/spotbias.js`, a balance probe that fishes each spot and tallies
   what it produced. Not a pass/fail gate — a tuning instrument.
+- **Debt sweep.** Made fish visible underwater, wired `lure.noise` into
+  spooking so a topwater popper landing on a bluegill's head genuinely scares
+  it while a pike shrugs (a real cost for the loud, long-reaching lures, and
+  now shown in the shop), fixed the ripple pool eviction, deleted two pieces
+  of dead code, and fixed the centred-HUD CSS bug above.
 
 ### 2026-07-28 — Session 1
 - Built the game: renderer, world, fish AI, fight sim, audio, UI, saves.
@@ -181,18 +192,17 @@ Ordered by how much each one changes the experience, not by how hard it is.
 
 Two things, in this order.
 
-**1. A debt sweep.** Several small items in section 1 are quick and one of
-them (fish visibility) is a genuine gameplay problem: you cannot see the fish
-you are trying to catch. Also wire `lure.noise` into spooking so the field
-means something, make `Ripples` a real ring buffer, and delete the dead
-`propDist` config and `retrieving` tackle state.
-
-**2. Tier 1 item 3 — goals that pull you forward.** The lake now has places
+**Tier 1 item 3 — goals that pull you forward.** The lake now has places
 worth going and gear worth buying, but nothing *asks* anything of you. A chain
 of commissions ("a 2 kg+ walleye, caught after midnight") that name a spot, a
 species and a condition would tie the chart, the boat, the clock and the
 tackle together into one thread. This is the last structural gap before the
 game is genuinely hard to put down.
+
+After that, the highest-value remaining items are the **fight camera** (the
+drama is currently entirely in a HUD bar — let the player see the fish) and
+**sonar**, which would make reading water an active skill rather than a
+lookup.
 
 ---
 

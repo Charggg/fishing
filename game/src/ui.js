@@ -915,7 +915,10 @@
       var stats = isRod
         ? 'line ×' + item.line.toFixed(2) + '   reel ×' + item.reel.toFixed(2) +
         '   cast ×' + item.cast.toFixed(2) + '   feel ×' + item.sens.toFixed(2)
-        : 'depth ' + item.depth.toFixed(1) + ' m   reach ' + item.radius + ' m   patience ×' + item.patience.toFixed(2);
+        : 'depth ' + item.depth.toFixed(1) + ' m   reach ' + item.radius + ' m   patience ×' +
+          item.patience.toFixed(2) + '   splash ' + (
+            item.noise < 0.25 ? 'silent' : item.noise < 0.5 ? 'quiet' :
+              item.noise < 0.7 ? 'loud' : 'very loud');
       row.innerHTML =
         '<div class="shop-em">' + (isRod ? '🎣' : item.icon) + '</div>' +
         '<div class="shop-info"><div class="shop-name">' + item.name + '</div>' +

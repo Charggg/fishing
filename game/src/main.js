@@ -38,9 +38,30 @@
     window.addEventListener('beforeunload', function () { if (game.started) game.save(); });
   }
 
+  /* On the desktop build the save of record is a file, not site data. Pull it
+     into localStorage before anything reads it, so the whole game downstream
+     stays exactly as it is in the browser. A missing or unreadable file just
+     falls through to whatever localStorage already had. */
+  function boot() {
+    var D = window.DEEPCAST_DESKTOP;
+    if (!D || !D.readSave) return start();
+    var done = false;
+    var go = function () { if (!done) { done = true; start(); } };
+    // Never let a wedged IPC call stop the game from starting.
+    setTimeout(go, 2500);
+    try {
+      D.readSave().then(function (data) {
+        if (data) {
+          try { localStorage.setItem('deepcast.save.v1', JSON.stringify(data)); } catch (e) { /* ignore */ }
+        }
+        go();
+      }, go);
+    } catch (e) { go(); }
+  }
+
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', start);
+    document.addEventListener('DOMContentLoaded', boot);
   } else {
-    start();
+    boot();
   }
 })(DC);

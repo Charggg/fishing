@@ -1,0 +1,39 @@
+{
+  "name": "deep-cast",
+  "productName": "Deep Cast",
+  "version": "1.0.0",
+  "description": "A first-person fishing game. Every mesh, texture and sound is generated in code.",
+  "main": "main.js",
+  "author": "Deep Cast",
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dist:win": "electron-builder --win --publish never",
+    "dist:mac": "electron-builder --mac --publish never",
+    "dist:linux": "electron-builder --linux --publish never"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.deepcast.game",
+    "productName": "Deep Cast",
+    "directories": { "output": "../dist/desktop", "buildResources": "build" },
+    "files": ["main.js", "preload.js", "package.json"],
+    "extraResources": [{ "from": "../game", "to": "game", "filter": ["**/*", "!qa/**", "!screenshots/**"] }],
+    "win": { "target": ["nsis", "portable"], "artifactName": "DeepCast-${version}-win-${arch}.${ext}" },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true
+    },
+    "mac": {
+      "target": [{ "target": "dmg", "arch": ["arm64", "x64"] }],
+      "category": "public.app-category.games",
+      "artifactName": "DeepCast-${version}-mac-${arch}.${ext}"
+    },
+    "linux": { "target": ["AppImage"], "category": "Game" }
+  }
+}

@@ -18,13 +18,22 @@ QA harness clean. It is not yet *massive* or *addictive* — that is the job.
 | Screenshots | `node game/qa/shots.js` | Eyes on it. Software rendering, so ignore the FPS numbers. |
 | Spot balance | `node game/qa/spotbias.js` | Fishes every spot and tallies the species. A tuning instrument, not a gate. |
 | **Everything** | `node game/qa/all.js` | Runs the whole suite and prints a scorecard. `--quick` for a ~3 min pass. Use this before saying done. |
-| Quest chain | `node game/qa/questplay.js` | A bot that reads the chart and plays the commission chain. Proves it is completable. |
+| Quest chain | `node game/qa/questplay.js` | A seeded bot that reads the chart and plays the chain. Gates on reaching **>= 10 of 12** — see the note below. |
+| Desktop shell | `node game/qa/desktop.js [binary]` | Boots the real Electron app: preload bridge, no node leaking into the page, save round-trips to disk, genuine WebGL2. Pass a packaged binary to test the packaged paths. |
 | Frame cost | `node game/qa/bench.js [preset]` | Milliseconds per frame under SwiftShader. **Absolute numbers are meaningless** — no GPU here. A/B ratios are not. |
 | Ablation | `node game/qa/ablate.js [preset]` | Turns one system off at a time and reports what it was costing. Use this before optimising anything. |
 | Viewmodel | `node game/qa/viewmodel.js --probe` | Measures where the rod, hands and forearms land on screen across a whole crank revolution. Exits non-zero. Drop `--probe` to also render the rod with pieces suppressed one at a time. |
 | Crop | `node game/qa/crop.js <png> <x> <y> <w> <h> [zoom]` | Zooms into a screenshot. There is no image library here, so it borrows the browser's canvas. |
 
 **Rule:** never leave the tree with a failing harness. Run both before saying done.
+
+**On questplay's threshold.** It does *not* require all twelve. The last two
+commissions want a 20 kg sturgeon and a Moonfin, both deliberately a grind, so
+whether a bot on a fixed budget lands them is genuinely stochastic — I A/B'd it
+and the *original* balance stalls at 11 too. A 12-of-12 gate fails at random,
+which is worse than no gate. That every goal is *satisfiable* is proved
+separately and deterministically by the harness, which synthesises a qualifying
+catch for each one.
 
 **On the viewmodel specifically:** it cannot be checked by reading the code, and
 it cannot be checked by glancing at a screenshot either — I "verified" the rod
@@ -56,9 +65,9 @@ QA scripts resolve Playwright through `game/qa/pw.js`, so they run with a plain
 - [ ] The water surface is a uniform 240x240 grid (~115k triangles) regardless
       of how much of it is on screen. A radial or clipmap grid would cut it
       hard. Worth ~18% of a frame.
-- [ ] Rarity is not gated by level or luck: a mythic can turn up on day one at
-      level 1, which happened to the player on their first session and cheapens
-      the whole ladder. Weight the roll by level.
+- [ ] The endgame commissions (20 kg sturgeon, Moonfin) are borderline even for
+      a well-equipped bot with 520 attempts. Either they need a nudge or the
+      player needs a way to *hunt* a specific fish rather than wait for it.
 
 ### Fixed
 - [x] **2026-07-28** *(user-reported)* **Insanely low frame rate.** Measured
@@ -344,6 +353,37 @@ independently, and a hooked fish that did not move.
 - `P` now reports preset, render resolution, dpr, props surviving the cull and
   terrain chunks — the numbers I would need to diagnose a slow machine from a
   single screenshot.
+
+### 2026-07-29 — Session 8 (autonomous)
+- **Desktop app.** An Electron shell in `desktop/`, wrapping the same `game/`
+  folder the browser build uses — `file://` still works untouched. It adds the
+  things a tab cannot: a guaranteed GPU, real fullscreen on F11 with Escape
+  left to the pause menu, remembered window geometry validated against the
+  displays that exist, and a save in a real file instead of clearable site
+  data. `contextIsolation` on, `nodeIntegration` off, preload exposes four
+  save functions and nothing else.
+- **It is verified, not just written.** `qa/desktop.js` boots the real app and
+  asserts the bridge is present, that `require`/`process` are NOT reachable
+  from the page, that a save round-trips to disk, and that the context is
+  genuinely WebGL2. Run against a *packaged* build too: `__dirname` moves
+  inside `app.asar` once packaged, which is exactly the bug that would ship.
+  Both dev and packaged pass here.
+- **CI builds Windows and macOS.** Cross-building from Linux does not work —
+  the Windows target fails at signing without Wine and a `.dmg` needs macOS —
+  so `.github/workflows/desktop.yml` packages on real runners. Unsigned, and
+  `desktop/README.md` says exactly what SmartScreen and Gatekeeper will do
+  about that.
+- **Rarity is now gated by progression.** The old curve made a Mythic only
+  ~8x rarer than a Bluegill, so the player pulled one on day one at level 1.
+  At full progression the curve is now *identical* to the original; at level 1
+  it is five orders of magnitude tighter.
+- **Found a fake gate.** `questplay` exited 0 no matter how far it got, so a
+  balance change could soft-lock the endgame and the suite would still say
+  green. Making it fail properly then exposed that it was non-deterministic
+  (7 to 12 commissions run to run), because the fight was seeded off
+  `Math.random`. Seeded it, then A/B'd the rarity change and found the
+  *original* balance stalls at 11 too — so the honest threshold is >= 10, and
+  deterministic completability stays the harness's job.
 
 ### 2026-07-28 — Session 1
 - Built the game: renderer, world, fish AI, fight sim, audio, UI, saves.

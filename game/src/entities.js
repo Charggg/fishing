@@ -518,7 +518,12 @@
     this.slack = 0;
     this.gained = 0;
   };
-  Fight.prototype.begin = function (fish, dist, angle) {
+  /* `rng` is optional but the QA bot always passes one: without it this used
+     Math.random and the whole commission playthrough became a coin toss,
+     finishing anywhere between 7 and 12 commissions run to run. A gate that
+     stochastic cannot tell a balance regression from luck. */
+  Fight.prototype.begin = function (fish, dist, angle, rng) {
+    rng = rng || Math.random;
     this.reset();
     this.active = true;
     this.fish = fish;
@@ -527,11 +532,11 @@
     this.tension = 0.22;
     this.stamina = 1;
     this.phase = 'run';
-    this.phaseTime = 0.5 + Math.random() * 0.6;
+    this.phaseTime = 0.5 + rng() * 0.6;
     this.angle = angle;
     this.angleTarget = angle;
     this.weave = 0;
-    this.weavePhase = Math.random() * M.TAU;
+    this.weavePhase = rng() * M.TAU;
     this.swimAngle = angle;
     this.rise = 0;
   };

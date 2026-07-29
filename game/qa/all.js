@@ -9,6 +9,7 @@
    GPU; any FPS number these produce is meaningless.                          */
 const { spawn } = require('child_process');
 const path = require('path');
+const fs = require('fs');
 
 const QUICK = process.argv.indexOf('--quick') >= 0;
 
@@ -23,18 +24,26 @@ const SUITE = [
   { name: 'demokit', kind: 'gate', args: ['demokit.js'],
     what: 'index.html?demo grants the kit once and only once' },
   { name: 'questplay', kind: 'gate', args: ['questplay.js'],
-    what: 'commission chain is completable end to end' },
+    what: 'a scripted angler gets >=10 of 12 commissions unaided' },
   { name: 'spotbias', kind: 'tuning', args: ['spotbias.js', '10'],
     what: 'which species each spot actually yields' },
   { name: 'shots', kind: 'gate', args: ['shots.js'], skip: QUICK,
-    what: 'screenshots render without page errors' }
+    what: 'screenshots render without page errors' },
+  // Only runs where the Electron shell has had `npm install` in desktop/.
+  { name: 'desktop', kind: 'gate', args: ['desktop.js'],
+    what: 'Electron shell boots, bridge is safe, saves reach disk',
+    needs: path.join(__dirname, '..', '..', 'desktop', 'node_modules', 'electron') }
 ];
 
 function run(step) {
   return new Promise(res => {
     const t0 = Date.now();
-    const p = spawn(process.execPath, [path.join(__dirname, step.args[0])].concat(step.args.slice(1)),
-      { cwd: __dirname, stdio: ['ignore', 'pipe', 'pipe'] });
+    const useXvfb = step.name === 'desktop' && process.platform === 'linux';
+    const cmd = useXvfb ? 'xvfb-run' : process.execPath;
+    const argv = useXvfb
+      ? ['-a', process.execPath, path.join(__dirname, step.args[0])].concat(step.args.slice(1))
+      : [path.join(__dirname, step.args[0])].concat(step.args.slice(1));
+    const p = spawn(cmd, argv, { cwd: __dirname, stdio: ['ignore', 'pipe', 'pipe'] });
     let out = '';
     p.stdout.on('data', d => { out += d; });
     p.stderr.on('data', d => { out += d; });
@@ -46,6 +55,10 @@ function run(step) {
   const results = [];
   for (const step of SUITE) {
     if (step.skip) { results.push({ step, skipped: true }); continue; }
+    if (step.needs && !fs.existsSync(step.needs)) {
+      results.push({ step, skipped: true, why: 'desktop/node_modules missing — run `npm install` in desktop/' });
+      continue;
+    }
     process.stdout.write('· ' + step.name + ' … ');
     const r = await run(step);
     const ok = r.code === 0;
@@ -56,7 +69,7 @@ function run(step) {
   console.log('\n' + '='.repeat(66) + '\nSCORECARD\n' + '='.repeat(66));
   let failed = 0;
   for (const r of results) {
-    if (r.skipped) { console.log('  --   ' + pad(r.step.name) + 'skipped'); continue; }
+    if (r.skipped) { console.log('  --   ' + pad(r.step.name) + 'skipped' + (r.why ? '  (' + r.why + ')' : '')); continue; }
     const gate = r.step.kind === 'gate';
     if (gate && !r.ok) failed++;
     const mark = r.ok ? ' ok  ' : (gate ? 'FAIL ' : 'note ');

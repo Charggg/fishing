@@ -262,7 +262,21 @@
    */
   function appeal(sp, ctx) {
     var w = 1;
-    w *= 1 / (1 + sp.rarity * 1.35);                       // rarity gate
+    /* Rarity, gated by how far the player has actually come.
+
+       The old curve was 1/(1 + rarity*1.35), which makes a Mythic only about
+       eight times rarer than a Bluegill — so a brand new player pulled one on
+       day one, and the whole ladder from Common to Mythic meant nothing. Two
+       terms now: a steep base falloff that applies to everybody, and a gate
+       that opens as level and rod sensitivity climb. At level 1 with the
+       starter rod a Mythic is effectively unreachable; late, with the right
+       rig over the right structure, it is the payoff the ladder exists for.
+
+       `luck` defaults to fully open when a caller does not supply it, so this
+       cannot silently starve any other code path that scores species. */
+    var access = ctx.luck === undefined ? 1 : M.sat(ctx.luck * 1.6);
+    w *= 1 / (1 + sp.rarity * 1.35);                       // the original curve
+    w *= Math.pow(0.10 + 0.90 * access, sp.rarity);        // ...gated by progress
     w *= Math.pow(actAt(sp.act, ctx.hour), 1.25);          // time of day
     var lureMul = sp.lures[ctx.lure.id];
     w *= (lureMul === undefined ? 0.5 : lureMul);

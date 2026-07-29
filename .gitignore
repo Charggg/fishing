@@ -1,2 +1,5 @@
+desktop/dist/
+desktop/node_modules/
 dist/
 game/qa/out/
+node_modules/

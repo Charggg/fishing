@@ -1,0 +1,76 @@
+# Builds the desktop app on real Windows and macOS runners.
+#
+# Cross-building these from Linux does not work: the Windows target fails at
+# the signing step without Wine, and a macOS .dmg can only be produced on
+# macOS. So the packaging is done here, on the actual platforms.
+#
+# The builds are UNSIGNED. Windows SmartScreen will warn on first run and
+# macOS Gatekeeper will refuse to open the app until it is allowed explicitly
+# — see desktop/README.md. Signing needs paid certificates from Microsoft and
+# Apple; add them as repository secrets and electron-builder will use them.
+name: Desktop builds
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-latest, name: Windows,       cmd: 'npx electron-builder --win nsis portable --publish never' }
+          - { os: macos-latest,   name: macOS,         cmd: 'npx electron-builder --mac dmg --publish never' }
+          - { os: ubuntu-latest,  name: Linux,         cmd: 'npx electron-builder --linux AppImage --publish never' }
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install shell dependencies
+        working-directory: desktop
+        run: npm install --no-audit --no-fund
+
+      # Prove the game still boots in the shell before spending time packaging.
+      - name: Install Playwright (for the smoke test)
+        working-directory: desktop
+        run: npm install --no-save playwright-core --no-audit --no-fund
+
+      - name: Smoke test the shell
+        if: runner.os != 'Linux'
+        working-directory: .
+        run: node game/qa/desktop.js
+
+      - name: Smoke test the shell (Linux needs a display)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update && sudo apt-get install -y xvfb
+          xvfb-run -a node game/qa/desktop.js
+
+      - name: Package
+        working-directory: desktop
+        env:
+          # Do not attempt to sign or notarise: there are no certificates here.
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: ${{ matrix.cmd }}
+
+      - name: Collect installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: DeepCast-${{ matrix.name }}
+          retention-days: 30
+          if-no-files-found: error
+          path: |
+            dist/desktop/*.exe
+            dist/desktop/*.dmg
+            dist/desktop/*.AppImage

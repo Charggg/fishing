@@ -553,7 +553,7 @@
     var ang = Math.atan2(f.z - _tip[2], f.x - _tip[0]);
     f.state = 'hooked';
     f.visible = false;
-    this.fight.begin(f, Math.max(dist, 2.2), ang);
+    this.fight.begin(f, Math.max(dist, 2.2), ang, this.rng);
     // Snapshot the conditions now: by the time it is landed the lure is out of
     // the water, the clock has moved and the spot lookup has been cleared.
     this.fight.ctx = {
@@ -1445,7 +1445,9 @@
       depth: -t.lureY,
       water: this.world.depthAt(t.lureX, t.lureZ),
       lure: lure,
-      spot: this.currentSpot
+      spot: this.currentSpot,
+      // How far up the rarity ladder this player can currently see.
+      luck: this.luck()
     };
     var radius = lure.radius * (1 + this.luck() * 0.35);
     var best = null, bestW = 0, bestKey = -1;
@@ -1877,6 +1879,12 @@
     try {
       localStorage.setItem(SAVE_KEY, JSON.stringify(this.state));
     } catch (e) { /* private mode, quota — not worth interrupting play */ }
+    /* The desktop build mirrors every save into a real file under the OS
+       app-data directory. localStorage still holds the working copy, so this
+       is additive and the browser build is untouched. */
+    if (window.DEEPCAST_DESKTOP) {
+      try { window.DEEPCAST_DESKTOP.writeSave(this.state); } catch (e) { /* keep playing */ }
+    }
   };
 
   Game.prototype.load = function () {

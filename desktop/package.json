@@ -20,20 +20,57 @@
   "build": {
     "appId": "com.deepcast.game",
     "productName": "Deep Cast",
-    "directories": { "output": "../dist/desktop", "buildResources": "build" },
-    "files": ["main.js", "preload.js", "package.json"],
-    "extraResources": [{ "from": "../game", "to": "game", "filter": ["**/*", "!qa/**", "!screenshots/**"] }],
-    "win": { "target": ["nsis", "portable"], "artifactName": "DeepCast-${version}-win-${arch}.${ext}" },
+    "directories": {
+      "output": "../dist/desktop",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../game",
+        "to": "game",
+        "filter": [
+          "**/*",
+          "!qa/**",
+          "!screenshots/**"
+        ]
+      }
+    ],
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ],
+      "artifactName": "DeepCast-${version}-win-${arch}.${ext}",
+      "signAndEditExecutable": false
+    },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true
     },
     "mac": {
-      "target": [{ "target": "dmg", "arch": ["arm64", "x64"] }],
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ],
       "category": "public.app-category.games",
       "artifactName": "DeepCast-${version}-mac-${arch}.${ext}"
     },
-    "linux": { "target": ["AppImage"], "category": "Game" }
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "Game"
+    }
   }
 }

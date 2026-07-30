@@ -62,14 +62,21 @@ QA scripts resolve Playwright through `game/qa/pw.js`, so they run with a plain
 - [ ] The reflection pass draws a fraction of prop instances on medium quality
       (`reflFrac`), which is a fixed prefix of the array, so the same trees are
       always missing. Should be a spatial choice, not an array slice.
-- [ ] The water surface is a uniform 240x240 grid (~115k triangles) regardless
-      of how much of it is on screen. A radial or clipmap grid would cut it
-      hard. Worth ~18% of a frame.
+- [ ] No Mac build has ever been produced. A .dmg needs macOS; CI does it, or
+      the player runs three commands on their own machine.
 - [ ] The endgame commissions (20 kg sturgeon, Moonfin) are borderline even for
       a well-equipped bot with 520 attempts. Either they need a nudge or the
       player needs a way to *hunt* a specific fish rather than wait for it.
 
 ### Fixed
+- [x] **2026-07-30** The water was a uniform square grid — 114k triangles spread
+      evenly over 380 m, so most of them landed on a thin band near the
+      skyline. The vertex shader had *always* been written for a camera-centred
+      polar disc (`aPos + uCenter`, `vDist = length(aPos)`); the grid builder
+      just never produced one and uCenter was hardcoded to (0,0). Finished the
+      design: 14k triangles at the same preset, and because far rings are
+      nearly free it now reaches 437 m, which also fixes the water stopping
+      short of the far shore when you row to one end of the lake.
 - [x] **2026-07-28** *(user-reported)* **Insanely low frame rate.** Measured
       rather than guessed, which mattered: my confident first theory (per-pixel
       analytic sky in the fog) turned out to be 6% of the frame. The real costs
@@ -384,6 +391,24 @@ independently, and a hooked fish that did not move.
   `Math.random`. Seeded it, then A/B'd the rarity change and found the
   *original* balance stalls at 11 too — so the honest threshold is >= 10, and
   deterministic completability stays the harness's job.
+
+### 2026-07-30 — Session 9 (autonomous)
+The player cannot reach GitHub for a while, so a CI workflow they cannot
+trigger is worth nothing to them. Priority became: get a real installable
+binary into their hands from here.
+
+- **A genuine Windows .exe, built in this container.** The earlier cross-build
+  failed inside electron-builder's `signApp`; `win.signAndEditExecutable:false`
+  skips both the signing and the rcedit metadata pass, and the build then
+  completes on Linux. Output is a valid PE32 self-extracting portable app with
+  `resources/game` intact. Caveat recorded honestly: a Windows binary cannot be
+  *run* here, so what is verified is that identical code and identical
+  packaging boot clean on Linux in both dev and packaged form.
+- **Water surface: uniform square grid -> camera-centred polar disc.** 114k
+  triangles down to 14k at the same preset. See the note in Fixed — the shader
+  was already written for this and the grid builder never caught up.
+- Frame cost at `high` is now 433 ms against the 887 ms measured before any of
+  the performance work: **2.05x cheaper**, and 2.7x at `low`.
 
 ### 2026-07-28 — Session 1
 - Built the game: renderer, world, fish AI, fight sim, audio, UI, saves.

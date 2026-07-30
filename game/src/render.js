@@ -255,31 +255,60 @@
     this.terrainExtent = extent;
   };
 
+  /* Water surface: a camera-centred polar disc.
+
+     The vertex shader was always written for one — it reads `aPos + uCenter`
+     and takes `vDist = length(aPos)` — but this function built a uniform
+     square grid and uCenter was passed as (0,0), so the design was never
+     finished. A uniform grid spends its triangles evenly across 380 metres,
+     which means far too many out at the horizon where they cover a pixel each
+     and no more near the boat than anywhere else.
+
+     Rings grow with a power curve, so density follows the camera: fine detail
+     where the waves are actually legible, sparse where it is a thin band near
+     the skyline. Same visual result for roughly a tenth of the geometry, and
+     it can now reach much further out for almost nothing, which also fixes
+     the water running out before the far shore when you row to one end. */
   Renderer.prototype.buildWaterGrid = function (n, extent) {
     var gl = this.gl;
-    var verts = new Float32Array(n * n * 2);
+    var rings = Math.max(12, Math.round(n * 0.24));
+    var segs = Math.max(24, Math.round(n * 0.52));
+    var radius = Math.max(extent, 40) * 2.3;      // comfortably past the far shore
+
+    var verts = new Float32Array((1 + rings * segs) * 2);
     var p = 0;
-    for (var j = 0; j < n; j++) {
-      for (var i = 0; i < n; i++) {
-        verts[p++] = -extent + (i / (n - 1)) * extent * 2;
-        verts[p++] = -extent + (j / (n - 1)) * extent * 2;
+    verts[p++] = 0; verts[p++] = 0;               // centre, under the camera
+    for (var k = 1; k <= rings; k++) {
+      var r = radius * Math.pow(k / rings, 2.15);
+      for (var i = 0; i < segs; i++) {
+        var a = i / segs * M.TAU;
+        verts[p++] = Math.cos(a) * r;
+        verts[p++] = Math.sin(a) * r;
       }
     }
-    var idx = new Uint32Array((n - 1) * (n - 1) * 6);
+
+    var idx = new Uint32Array(segs * 3 + (rings - 1) * segs * 6);
     var q = 0;
-    for (var jj = 0; jj < n - 1; jj++) {
-      for (var ii = 0; ii < n - 1; ii++) {
-        var a = jj * n + ii, b = a + 1, c = a + n, d = c + 1;
-        idx[q++] = a; idx[q++] = c; idx[q++] = b;
-        idx[q++] = b; idx[q++] = c; idx[q++] = d;
+    for (var c = 0; c < segs; c++) {              // centre fan
+      idx[q++] = 0;
+      idx[q++] = 1 + c;
+      idx[q++] = 1 + ((c + 1) % segs);
+    }
+    for (var kk = 1; kk < rings; kk++) {          // quads between rings
+      var base = 1 + (kk - 1) * segs, next = 1 + kk * segs;
+      for (var j = 0; j < segs; j++) {
+        var j2 = (j + 1) % segs;
+        idx[q++] = base + j; idx[q++] = next + j; idx[q++] = base + j2;
+        idx[q++] = base + j2; idx[q++] = next + j; idx[q++] = next + j2;
       }
     }
+
     var vb = GLX.buffer(gl, verts);
     var ib = GLX.buffer(gl, idx, gl.ELEMENT_ARRAY_BUFFER);
     if (this.water && this.water.vao) gl.deleteVertexArray(this.water.vao);
     this.water = {
       vao: GLX.vao(gl, [{ buffer: vb, loc: LOC.aPos, size: 2 }], ib),
-      count: q
+      count: q, radius: radius
     };
   };
 
@@ -649,7 +678,9 @@
     this._sky(pw, s);
     this._waves(pw, s);
     gl.uniformMatrix4fv(pw.u.uViewProj, false, this.viewProj);
-    gl.uniform2f(pw.u.uCenter, 0, 0);
+    // Snap to a coarse step so the disc does not shimmer as the camera creeps.
+    gl.uniform2f(pw.u.uCenter,
+      Math.round(s.camPos[0] / 4) * 4, Math.round(s.camPos[2] / 4) * 4);
     gl.uniform2f(pw.u.uScreen, this.width, this.height);
     gl.uniform1f(pw.u.uNear, this.near);
     gl.uniform1f(pw.u.uFar, this.far);

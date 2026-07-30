@@ -20,12 +20,28 @@ QA harness clean. It is not yet *massive* or *addictive* — that is the job.
 | **Everything** | `node game/qa/all.js` | Runs the whole suite and prints a scorecard. `--quick` for a ~3 min pass. Use this before saying done. |
 | Quest chain | `node game/qa/questplay.js` | A seeded bot that reads the chart and plays the chain. Gates on *nothing throwing*, not on a score — see the note below. |
 | Desktop shell | `node game/qa/desktop.js [binary]` | Boots the real Electron app: preload bridge, no node leaking into the page, save round-trips to disk, genuine WebGL2. Pass a packaged binary to test the packaged paths. |
-| Frame cost | `node game/qa/bench.js [preset]` | Milliseconds per frame under SwiftShader. **Absolute numbers are meaningless** — no GPU here. A/B ratios are not. |
+| Frame cost | `node game/qa/bench.js [preset]` | Frame cost under SwiftShader. **Quote the INDEX, never the milliseconds** — see the note below. |
 | Ablation | `node game/qa/ablate.js [preset]` | Turns one system off at a time and reports what it was costing. Use this before optimising anything. |
 | Viewmodel | `node game/qa/viewmodel.js --probe` | Measures where the rod, hands and forearms land on screen across a whole crank revolution. Exits non-zero. Drop `--probe` to also render the rod with pieces suppressed one at a time. |
 | Crop | `node game/qa/crop.js <png> <x> <y> <w> <h> [zoom]` | Zooms into a screenshot. There is no image library here, so it borrows the browser's canvas. |
 
 **Rule:** never leave the tree with a failing harness. Run both before saying done.
+
+**On bench.js and the drifting machine.** This container's absolute speed
+varies by nearly **2x over a few minutes** — it is a shared CPU, and
+SwiftShader is pure CPU, so everything moves together. A "before" measured ten
+minutes ago against an "after" measured now is worthless.
+
+I learned that the expensive way: a change that moved terrain noise off the
+per-pixel path measured **74% slower**, I concluded it was a serious
+regression, and only caught the mistake because reverting produced the *same*
+slow number. Measured back to back it is 5-10% faster.
+
+`bench.js` now times a fixed arithmetic loop in the same process and reports
+`INDEX = frame / calibration`. The index is comparable across runs; the
+milliseconds are not. **When comparing two versions, run them back to back and
+compare indices** — and be suspicious of any single before/after pair
+separated by edits.
 
 **On questplay, and what a stochastic test can honestly gate.** Observed
 outcomes on an identical build are 7, 10, 10 and 12 — seeding the game RNG cut
@@ -80,6 +96,11 @@ QA scripts resolve Playwright through `game/qa/pw.js`, so they run with a plain
       score instead of only that nothing threw.
 
 ### Fixed
+- [x] **2026-07-31** Terrain colour cost four dependent texture fetches per
+      pixel (two 2-octave noises), across most of the screen, three passes a
+      frame. `macro` has a ~130 m wavelength against a 1.5 m mesh, so it is now
+      baked per-vertex and interpolated; `grain` dropped to a single octave.
+      One fetch per pixel instead of four.
 - [x] **2026-07-30** The water was a uniform square grid — 114k triangles spread
       evenly over 380 m, so most of them landed on a thin band near the
       skyline. The vertex shader had *always* been written for a camera-centred
@@ -442,6 +463,20 @@ binary into their hands from here.
 - Fixed `all.js` filtering the single most important line out of each tool's
   log — questplay's own verdict was never reaching the scorecard.
 
+### 2026-07-31 — Session 11 (autonomous)
+- **Terrain colour: four texture fetches per pixel down to one.** `macro` is a
+  ~130 m wavelength term being evaluated per fragment against a 1.5 m mesh —
+  it belongs on the vertices. Baked it there (stride 8 -> 9, new `aMacro`
+  slot), and dropped `grain` to a single octave. Looks the same or slightly
+  better: the CPU fbm has more character than the two-octave GPU one.
+- **Caught my own instrument lying.** That change measured 74% *slower*, I
+  believed it, and reverted — then the revert measured slow too. The machine
+  had drifted, not the code. `bench.js` now self-calibrates against a fixed CPU
+  loop and reports an index; see the note in section 0. Worth assuming some of
+  the earlier single-pair measurements in this log are noisier than they read.
+- Steam is now the stated end goal, so the roadmap has a section for what that
+  actually requires beyond "the game is good".
+
 ### 2026-07-28 — Session 1
 - Built the game: renderer, world, fish AI, fight sim, audio, UI, saves.
 
@@ -466,6 +501,38 @@ In order:
 Open balance question worth a look: crappie are over-represented at nearly
 every spot (common, wide depth band, listed in several biases). Narrowing
 their band is a one-line experiment; run `spotbias.js` before and after.
+
+---
+
+## 3b. If this is going to Steam
+
+Not a wish list — the things that are actually missing between "a good build"
+and "a store page someone can buy from".
+
+**Blocking**
+- [ ] **An icon and a name that survive packaging.** `win.signAndEditExecutable`
+      is currently false so the cross-build works from Linux, and that *also*
+      skips embedding the icon and version metadata. It ships with the default
+      Electron icon. Building on a real Windows runner (CI already does) fixes
+      this; the flag is a Linux-only compromise.
+- [ ] **Code signing.** Unsigned means a SmartScreen warning on every fresh
+      install and outright refusal on macOS. Steam does not remove that.
+      Certificates are the only fix.
+- [ ] **A main menu and save slots.** There is one implicit save and no way to
+      start over except wiping storage.
+- [ ] **Audio nobody has heard.** It is synthesised and asserted not to throw.
+      That is not the same as "good", and on a store page it is the first
+      thing reviewers mention.
+- [ ] **Settings that persist properly** — key rebinding, resolution, and a
+      real graphics menu rather than four presets.
+
+**Content, honestly**
+- [ ] One lake and sixteen species is a demo, not a product. Seasons (Tier 2)
+      would multiply it cheaply; more lakes would multiply it expensively.
+
+**Free wins already in place:** no binary assets so the download is tiny,
+adaptive quality so it runs on weak machines, and a save format that is plain
+JSON in a real file.
 
 ---
 

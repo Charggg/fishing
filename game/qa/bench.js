@@ -13,7 +13,17 @@
    ratio is meaningful even though neither absolute number is.
 
    gl.finish() after every frame, or the timings measure how fast the driver
-   accepts commands rather than how long the work takes.                      */
+   accepts commands rather than how long the work takes.
+
+   AND: this machine's absolute speed drifts by nearly 2x over a few minutes
+   (shared CPU, and SwiftShader is pure CPU). A "before" taken ten minutes ago
+   against an "after" taken now is meaningless — I drew exactly that wrong
+   conclusion once, decided a good change was a 74% regression, and only caught
+   it because reverting produced the same slow number.
+
+   So every run also times a fixed arithmetic loop and reports INDEX =
+   frame / calibration. The index is comparable across runs and across days;
+   the raw milliseconds are not. Quote the index.                             */
 const pw = require('./pw');
 const path = require('path');
 
@@ -69,13 +79,25 @@ const H = parseInt(process.argv[5] || '540', 10);
       return ts;
     };
 
+    /* Fixed workload, same process, same moment: whatever is slowing the box
+       down slows this down too, so the ratio cancels it. SwiftShader runs on
+       the CPU, which is why a CPU loop is a fair yardstick for it. */
+    const calibrate = () => {
+      const t0 = performance.now();
+      let acc = 0;
+      for (let i = 1; i < 4000000; i++) acc += Math.sqrt(i) * 1.0000001;
+      return { ms: performance.now() - t0, acc };
+    };
+    calibrate();                           // warm the JIT
     sample(8);                             // warm up: shader compile, caches
+    const cal = [calibrate().ms, calibrate().ms, calibrate().ms].sort((a, b) => a - b)[1];
     const ts = sample(frames).sort((a, b) => a - b);
     const med = ts[ts.length >> 1];
     const mean = ts.reduce((a, b) => a + b, 0) / ts.length;
     const r = g.renderer;
     return {
       median: +med.toFixed(2), mean: +mean.toFixed(2),
+      cal: +cal.toFixed(2), index: +(med / cal).toFixed(3),
       min: +ts[0].toFixed(2), max: +ts[ts.length - 1].toFixed(2),
       buffer: r.width + 'x' + r.height,
       quality: r.qualityName,
@@ -86,7 +108,9 @@ const H = parseInt(process.argv[5] || '540', 10);
   console.log('preset ' + out.quality + '  buffer ' + out.buffer + '  fish ' + out.fish);
   console.log('  median ' + out.median + ' ms   mean ' + out.mean +
     ' ms   min ' + out.min + '   max ' + out.max);
-  console.log('  (software rasteriser — compare runs, never quote as FPS)');
+  console.log('  calibration ' + out.cal + ' ms   ->   INDEX ' + out.index);
+  console.log('  (software rasteriser. Compare the INDEX between runs — raw ms');
+  console.log('   drift with machine load, and none of it is FPS.)');
   if (errs.length) console.log('page errors:\n' + errs.join('\n'));
   await browser.close();
 })();

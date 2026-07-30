@@ -136,7 +136,7 @@
   World.prototype.buildTerrainMesh = function () {
     var axis = buildAxis();
     var n = axis.length;
-    var verts = new Float32Array(n * n * 8);
+    var verts = new Float32Array(n * n * 9);
     var self = this;
     var nrm = [0, 0, 0];
     var p = 0;
@@ -170,10 +170,11 @@
 
         var vary = M.fbm2(x * 0.09 + 3.1, z * 0.09 - 7.7, 3) * 0.5 + 0.5;
 
+        var macro = M.fbm2(x * 0.0075, z * 0.0075, 3) * 0.5 + 0.5;
         verts[p] = x; verts[p + 1] = h; verts[p + 2] = z;
         verts[p + 3] = nrm[0]; verts[p + 4] = nrm[1]; verts[p + 5] = nrm[2];
-        verts[p + 6] = ao; verts[p + 7] = vary;
-        p += 8;
+        verts[p + 6] = ao; verts[p + 7] = vary; verts[p + 8] = macro;
+        p += 9;
       }
     }
 
@@ -201,7 +202,7 @@
         }
         for (var hj = j0; hj <= j1; hj++) {
           for (var hi = i0; hi <= i1; hi++) {
-            var hy = verts[(hj * n + hi) * 8 + 1];
+            var hy = verts[(hj * n + hi) * 9 + 1];
             if (hy < minY) minY = hy;
             if (hy > maxY) maxY = hy;
           }

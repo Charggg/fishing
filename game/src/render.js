@@ -15,7 +15,7 @@
   // Fixed attribute slots shared by every program.
   var LOC = {
     aPos: 0, aNormal: 1, aColor: 2, aFlex: 3,
-    aAO: 2, aVar: 3, aT: 1, aCorner: 0,
+    aAO: 2, aVar: 3, aMacro: 4, aT: 1, aCorner: 0,
     iPosScale: 4, iRotTint: 5,
     iPosSize: 4, iRot: 5, iDorsal: 6, iBelly: 7, iFin: 8, iShape: 9,
     iColor: 5, iParam: 5
@@ -214,13 +214,14 @@
     var gl = this.gl;
     var vb = GLX.buffer(gl, terrain.data);
     var ib = GLX.buffer(gl, terrain.indices, gl.ELEMENT_ARRAY_BUFFER);
-    var st = 8 * 4;
+    var st = 9 * 4;
     this.terrain = {
       vao: GLX.vao(gl, [
         { buffer: vb, loc: LOC.aPos, size: 3, stride: st, offset: 0 },
         { buffer: vb, loc: LOC.aNormal, size: 3, stride: st, offset: 12 },
         { buffer: vb, loc: LOC.aAO, size: 1, stride: st, offset: 24 },
-        { buffer: vb, loc: LOC.aVar, size: 1, stride: st, offset: 28 }
+        { buffer: vb, loc: LOC.aVar, size: 1, stride: st, offset: 28 },
+        { buffer: vb, loc: LOC.aMacro, size: 1, stride: st, offset: 32 }
       ], ib),
       count: terrain.indexCount,
       chunks: terrain.chunks || null
@@ -232,7 +233,8 @@
           { buffer: vb, loc: LOC.aPos, size: 3, stride: st, offset: 0 },
           { buffer: vb, loc: LOC.aNormal, size: 3, stride: st, offset: 12 },
           { buffer: vb, loc: LOC.aAO, size: 1, stride: st, offset: 24 },
-          { buffer: vb, loc: LOC.aVar, size: 1, stride: st, offset: 28 }
+          { buffer: vb, loc: LOC.aVar, size: 1, stride: st, offset: 28 },
+          { buffer: vb, loc: LOC.aMacro, size: 1, stride: st, offset: 32 }
         ], lib),
         count: terrain.lodIndexCount
       };

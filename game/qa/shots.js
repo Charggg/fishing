@@ -57,7 +57,33 @@ const SHOTS = [
         n++;
       }
     } },
+  { tag: 'fight', frames: 1, setup: g => {
+      /* Mid-fight, so the fight camera and the hooked fish are both visible.
+         Driven straight into the fight rather than waiting for a bite. */
+      g.state.hour = 17.4; g.player.pitch = -0.05;
+      const sp = g.spots.find(s => s.id === 'shelf') || g.spots[2];
+      if (!g.boat.aboard) g.toggleBoat();
+      if (!g.boat.anchored) g.toggleAnchor();
+      g.boat.x = sp.x; g.boat.z = sp.z;
+      g.player.x = sp.x; g.player.z = sp.z;
+      g.keys['w'] = false;
+      for (let i = 0; i < 6; i++) { g.time += 1 / 60; g.update(1 / 60); g.state.hour = 17.4; }
+
+      const f = g.shoal.fish.find(x => x.sp && x.sp.kg[1] > 4) || g.shoal.fish[0];
+      f.x = sp.x + 9; f.z = sp.z + 5; f.y = -1.2;
+      g.tackle.state = 'water'; g.tackle.active = true;
+      g.tackle.x = f.x; g.tackle.z = f.z;
+      g.tackle.lureX = f.x; g.tackle.lureZ = f.z; g.tackle.lureY = -1.2;
+      // setHook() is the real entry point and it insists on a live bite.
+      g.engaged = f;
+      g.mode = 'bite';
+      g.setHook();
+      // Run it a while so the fish has swum and the camera has reacted.
+      g.mouse.down = false;
+      for (let i = 0; i < 220; i++) { g.time += 1 / 60; g.update(1 / 60); g.state.hour = 17.4; }
+    } },
   { tag: 'sonar', frames: 600, setup: g => {
+      g.reelIn();
       g.state.hour = 10.2; g.player.pitch = -0.10;
       g.state.gear = ['sonar']; g.sonar.on = true;
       // Drift across the drop-off so the trace has real structure in it, not

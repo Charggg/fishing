@@ -34,6 +34,7 @@ const SESSIONS = parseInt(process.argv[2] || '3', 10);
     let maxCast = 0, maxParticles = 0, maxRipples = 0, maxFishDrawn = 0, trackDeepest = 0;
 
     const oarSweep = [], fightTrack = [], fightSpans = [];
+    let calmFrames = 0, fishFrames = 0, fishOnScreen = 0;
     const seenFail = Object.create(null);
     function fail(msg) {
       // Collapse repeats: a stuck frame otherwise emits the same line 2000 times.
@@ -163,6 +164,40 @@ const SESSIONS = parseInt(process.argv[2] || '3', 10);
           L[2].toFixed(2) + ' vs ' + R[2].toFixed(2) + ')');
         if (Math.abs(L[1] - R[1]) > 0.15) fail(tag + ': one oar lifting while the other digs in');
         oarSweep.push(L[2]);
+      }
+
+      /* Fight camera. Everything it does is an offset applied at the last
+         moment, so the failure mode is silent drift: shake leaking into the
+         player's aim, or an offset that never decays. Bound them, and check
+         they relax when there is no fish. */
+      const fc = g.fightCam;
+      if (fc) {
+        for (const k of ['yaw', 'pitch', 'roll', 'shake', 'kick', 'fov']) {
+          if (!finite(fc[k])) fail(tag + ': fightCam.' + k + ' not finite');
+        }
+        if (Math.abs(fc.yaw) > 0.35 || Math.abs(fc.pitch) > 0.35 || Math.abs(fc.roll) > 0.35) {
+          fail(tag + ': fight camera offset runaway (' + fc.yaw.toFixed(2) + ',' +
+            fc.pitch.toFixed(2) + ',' + fc.roll.toFixed(2) + ')');
+        }
+        const boost = g.scene.fovBoost || 0;
+        if (boost < -0.30 || boost > 0.30) fail(tag + ': fov boost out of range ' + boost.toFixed(3));
+        if (g.mode !== 'fighting') {
+          calmFrames++;
+          if (calmFrames > 240 && (Math.abs(fc.yaw) > 0.01 || Math.abs(fc.pitch) > 0.01)) {
+            fail(tag + ': fight camera never relaxed after the fight ended');
+          }
+        } else calmFrames = 0;
+      }
+
+      /* Does the assist actually keep the fish in view? That is the whole
+         point of it, and it is the one thing a bounds check cannot tell you. */
+      if (g.mode === 'fighting' && g.hookedRender) {
+        const h = g.hookedRender;
+        let dx = h.x - s.camPos[0], dy = h.y - s.camPos[1], dz = h.z - s.camPos[2];
+        const L = Math.hypot(dx, dy, dz) || 1;
+        const dot = (dx * s.forward[0] + dy * s.forward[1] + dz * s.forward[2]) / L;
+        fishFrames++;
+        if (dot > 0.72) fishOnScreen++;      // roughly inside a 70 degree view
       }
 
       /* A hooked fish has to actually move. It used to change direction only
@@ -573,6 +608,7 @@ const SESSIONS = parseInt(process.argv[2] || '3', 10);
       spotCount: (g.spots || []).length,
       spotsLogged: Object.keys(g.state.spots || {}).length,
       questCount: DC.Quests.LIST.length,
+      fishFrames: fishFrames, fishOnScreen: fishOnScreen,
       oarTravel: oarSweep.length ? Math.max.apply(null, oarSweep) - Math.min.apply(null, oarSweep) : 0,
       fightSpanAvg: fightSpans.length
         ? fightSpans.reduce(function (a, b) { return a + b; }, 0) / fightSpans.length : 0,
@@ -599,6 +635,9 @@ const SESSIONS = parseInt(process.argv[2] || '3', 10);
   console.log('boat depth    ' + report.boatDeepest.toFixed(1) + ' m deepest water reached');
   console.log('spots         ' + report.spotCount + ' found, ' + report.spotsLogged + ' logged');
   console.log('commissions   ' + report.questCount + ' in the chain, all verified completable');
+  console.log('fight camera  hooked fish in view ' +
+    (report.fishFrames ? (report.fishOnScreen / report.fishFrames * 100).toFixed(0) : '0') +
+    '% of fight frames');
   console.log('oar stroke    ' + report.oarTravel.toFixed(2) + ' m fore/aft, both blades in sync');
   console.log('fish movement ' + report.fightsTracked + ' fights, hooked fish ranged ' +
     report.fightSpanAvg.toFixed(1) + ' m avg / ' + report.fightSpanMin.toFixed(1) + ' m worst');

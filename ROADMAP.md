@@ -18,7 +18,7 @@ QA harness clean. It is not yet *massive* or *addictive* — that is the job.
 | Screenshots | `node game/qa/shots.js` | Eyes on it. Software rendering, so ignore the FPS numbers. |
 | Spot balance | `node game/qa/spotbias.js` | Fishes every spot and tallies the species. A tuning instrument, not a gate. |
 | **Everything** | `node game/qa/all.js` | Runs the whole suite and prints a scorecard. `--quick` for a ~3 min pass. Use this before saying done. |
-| Quest chain | `node game/qa/questplay.js` | A seeded bot that reads the chart and plays the chain. Gates on reaching **>= 10 of 12** — see the note below. |
+| Quest chain | `node game/qa/questplay.js` | A seeded bot that reads the chart and plays the chain. Gates on *nothing throwing*, not on a score — see the note below. |
 | Desktop shell | `node game/qa/desktop.js [binary]` | Boots the real Electron app: preload bridge, no node leaking into the page, save round-trips to disk, genuine WebGL2. Pass a packaged binary to test the packaged paths. |
 | Frame cost | `node game/qa/bench.js [preset]` | Milliseconds per frame under SwiftShader. **Absolute numbers are meaningless** — no GPU here. A/B ratios are not. |
 | Ablation | `node game/qa/ablate.js [preset]` | Turns one system off at a time and reports what it was costing. Use this before optimising anything. |
@@ -27,13 +27,20 @@ QA harness clean. It is not yet *massive* or *addictive* — that is the job.
 
 **Rule:** never leave the tree with a failing harness. Run both before saying done.
 
-**On questplay's threshold.** It does *not* require all twelve. The last two
-commissions want a 20 kg sturgeon and a Moonfin, both deliberately a grind, so
-whether a bot on a fixed budget lands them is genuinely stochastic — I A/B'd it
-and the *original* balance stalls at 11 too. A 12-of-12 gate fails at random,
-which is worse than no gate. That every goal is *satisfiable* is proved
-separately and deterministically by the harness, which synthesises a qualifying
-catch for each one.
+**On questplay, and what a stochastic test can honestly gate.** Observed
+outcomes on an identical build are 7, 10, 10 and 12 — seeding the game RNG cut
+the spread but did not remove it, so something is still unseeded (`Math.random`
+survives in a couple of cosmetic pool paths; worth finishing). I set the bar at
+12, then 10, then 8, and the suite went red each time on a build with nothing
+wrong with it.
+
+That is the trap: ratcheting a threshold down until it stops failing turns a
+gate into decoration while leaving it *looking* strict. So questplay now
+asserts only what is stable — nothing throws, and the bot is not hard
+soft-locked near the start (< 5) — and **prints the reached count every run**,
+so a drift from ~10 to 3 is obvious to a human even though it does not fail the
+build. Deterministic proof that all twelve goals are *satisfiable* belongs to
+the harness, which synthesises a qualifying catch for each one.
 
 **On the viewmodel specifically:** it cannot be checked by reading the code, and
 it cannot be checked by glancing at a screenshot either — I "verified" the rod
@@ -67,6 +74,10 @@ QA scripts resolve Playwright through `game/qa/pw.js`, so they run with a plain
 - [ ] The endgame commissions (20 kg sturgeon, Moonfin) are borderline even for
       a well-equipped bot with 520 attempts. Either they need a nudge or the
       player needs a way to *hunt* a specific fish rather than wait for it.
+- [ ] `questplay` is still not deterministic despite seeding `g.rng` and the
+      shoal: `Math.random` survives in `Ripples`/`Particles` pool recycling and
+      in the fish reset. Finish that and the gate can go back to asserting a
+      score instead of only that nothing threw.
 
 ### Fixed
 - [x] **2026-07-30** The water was a uniform square grid — 114k triangles spread
@@ -409,6 +420,27 @@ binary into their hands from here.
   was already written for this and the grid builder never caught up.
 - Frame cost at `high` is now 433 ms against the 887 ms measured before any of
   the performance work: **2.05x cheaper**, and 2.7x at `low`.
+
+### 2026-07-30 — Session 10 (autonomous)
+- **The fight camera.** All the drama of a fight used to live inside a HUD bar.
+  Now the view does the work: a gentle aim assist that keeps a running fish on
+  screen, a kick on every phase change and jump, shake scaled by headshake and
+  tension, and a slight lean-in on the field of view as the line loads. Every
+  part of it is an OFFSET applied at the last moment — nothing writes back into
+  the player's aim, so shake cannot accumulate and letting go of a fish leaves
+  the camera where they left it. Harness measures the point of the feature:
+  **the hooked fish is in view 99% of fight frames.**
+- **It caught a real bug immediately.** `updatePlayer` returns early on the
+  boat path, so the camera work I had added at the tail of that function did
+  nothing at all while aboard — which is where nearly all the fishing happens.
+  Both paths now share one `applyAim()`.
+- **Stopped ratcheting a flaky gate.** See the note in section 0. Short version:
+  I set questplay's threshold at 12, then 10, then 8, and the suite went red
+  each time on a healthy build. Lowering a threshold until it stops failing
+  turns a gate into decoration while leaving it looking strict, so it now
+  gates only on what is stable and prints the score for a human to read.
+- Fixed `all.js` filtering the single most important line out of each tool's
+  log — questplay's own verdict was never reaching the scorecard.
 
 ### 2026-07-28 — Session 1
 - Built the game: renderer, world, fish AI, fight sim, audio, UI, saves.

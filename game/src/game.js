@@ -104,6 +104,15 @@
       lastDepth: 0, lastMarks: 0, dirty: true
     };
 
+    /* Fight camera. Everything dramatic about a fight used to happen inside a
+       HUD bar; this puts it in the view. `yaw`/`pitch` are OFFSETS added to
+       the player's aim, never written back into it, so the shake cannot
+       accumulate and the player never finds their aim quietly moved. */
+    this.fightCam = {
+      yaw: 0, pitch: 0, shake: 0, kick: 0, roll: 0,
+      fov: 0, lastPhase: '', jump: 0
+    };
+
     this.scene = {
       camPos: new Float32Array(3),
       forward: new Float32Array(3),
@@ -364,6 +373,8 @@
       self.player.yaw -= e.movementX * s;
       self.player.pitch -= e.movementY * s * (self.mouse.invert ? -1 : 1);
       self.player.pitch = M.clamp(self.player.pitch, -1.45, 1.42);
+      // The fight camera assist backs off while the player is aiming.
+      if (Math.abs(e.movementX) + Math.abs(e.movementY) > 1) self.mouse.idle = 0;
     });
 
     document.addEventListener('pointerlockchange', function () {
@@ -1015,6 +1026,25 @@
   };
   var _mBoat = M4.create();
 
+  /* The player's aim plus the fight camera's offsets, resolved into the scene
+     forward vector. Both the on-foot and the aboard-the-boat paths call this:
+     the boat path returns early, and when this logic lived inline at the end
+     of updatePlayer the whole fight camera silently did nothing while you were
+     in the boat — which is where almost all the fishing happens. */
+  Game.prototype.applyAim = function (dt) {
+    var p = this.player, s = this.scene, fc = this.fightCam;
+    this.mouse.idle = (this.mouse.idle || 0) + dt;
+    if (this.mode !== 'fighting') this.relaxFightCam(dt);
+    var aimYaw = p.yaw + fc.yaw;
+    var aimPitch = M.clamp(p.pitch + fc.pitch, -1.52, 1.48);
+    var cp = Math.cos(aimPitch);
+    s.forward[0] = -Math.sin(aimYaw) * cp;
+    s.forward[1] = Math.sin(aimPitch);
+    s.forward[2] = -Math.cos(aimYaw) * cp;
+    s.fovBoost = fc.fov;
+    return aimYaw;
+  };
+
   Game.prototype.updatePlayer = function (dt) {
     var p = this.player, k = this.keys;
 
@@ -1037,13 +1067,11 @@
       s2.camPos[0] = eyeX;
       s2.camPos[1] = p.y + Math.sin(p.bobPhase) * 0.006;
       s2.camPos[2] = eyeZ;
-      var cp2 = Math.cos(p.pitch);
-      s2.forward[0] = -Math.sin(p.yaw) * cp2;
-      s2.forward[1] = Math.sin(p.pitch);
-      s2.forward[2] = -Math.cos(p.yaw) * cp2;
-      // Let the horizon roll a little with the hull. Subtle on purpose.
-      var rollCam = -b.roll * 0.45;
-      var rx2 = Math.cos(p.yaw), rz2 = -Math.sin(p.yaw);
+      var aimYaw2 = this.applyAim(dt);
+      // Let the horizon roll a little with the hull, plus whatever the fight
+      // camera is adding. Subtle on purpose.
+      var rollCam = -b.roll * 0.45 + this.fightCam.roll;
+      var rx2 = Math.cos(aimYaw2), rz2 = -Math.sin(aimYaw2);
       s2.up[0] = M.damp(s2.up[0], rx2 * Math.sin(rollCam), 8, dt);
       s2.up[1] = Math.cos(rollCam);
       s2.up[2] = M.damp(s2.up[2], rz2 * Math.sin(rollCam), 8, dt);
@@ -1103,10 +1131,13 @@
     s.camPos[0] = p.x;
     s.camPos[1] = p.y + p.bob;
     s.camPos[2] = p.z;
-    var cp = Math.cos(p.pitch);
-    s.forward[0] = -Math.sin(p.yaw) * cp;
-    s.forward[1] = Math.sin(p.pitch);
-    s.forward[2] = -Math.cos(p.yaw) * cp;
+    var aimYaw = this.applyAim(dt);
+    // On foot the roll is purely the fight camera.
+    var rollF = this.fightCam.roll;
+    var rxF = Math.cos(aimYaw), rzF = -Math.sin(aimYaw);
+    s.up[0] = M.damp(s.up[0], rxF * Math.sin(rollF), 10, dt);
+    s.up[1] = Math.cos(rollF);
+    s.up[2] = M.damp(s.up[2], rzF * Math.sin(rollF), 10, dt);
     s.underwater = M.damp(s.underwater, s.camPos[1] < 0 ? 1 : 0, 10, dt);
   };
 
@@ -1511,6 +1542,8 @@
     /* Face along the arc it is travelling, not just straight away from the rod:
        a fish sweeping sideways should be side-on to you, which is the whole
        reason a big one looks big. */
+    this.driveFightCam(dt, fx, fy, fz, f);
+
     var toRod = Math.atan2(_tip[2] - fz, _tip[0] - fx);
     var lateral = (fight.weave || 0) * 1.9 + (fight.angleTarget !== undefined
       ? M.clamp(fight.angleTarget - fight.angle, -1, 1) * 0.9 : 0);
@@ -2000,6 +2033,74 @@
     sn.lastDepth = depth;
     sn.lastMarks = marks.length;
     sn.dirty = true;
+  };
+
+  /* ====================================================================== */
+  /*  FIGHT CAMERA                                                          */
+  /* ====================================================================== */
+  /* Puts the fight in the view instead of in a progress bar. Three things:
+     a gentle aim assist so a fish that runs sideways does not simply leave
+     the screen, a kick on every headshake and run, and a slight lean-in on
+     the field of view as the line loads up.
+
+     All of it is an OFFSET. Nothing here writes back into player.yaw or
+     player.pitch, so shake cannot accumulate into the player's aim, and
+     letting go of the fish leaves the camera exactly where they left it. */
+  Game.prototype.driveFightCam = function (dt, fx, fy, fz, f) {
+    var c = this.fightCam, p = this.player, s = this.scene, fight = this.fight;
+
+    // Kick when the fish does something. Phase changes and jumps land hardest.
+    if (fight.phase !== c.lastPhase) {
+      c.lastPhase = fight.phase;
+      if (fight.phase === 'run') c.kick = Math.min(1, 0.35 + f.kg * 0.045);
+    }
+    if (fight.jump > c.jump && fight.jump > 0.8) c.kick = Math.min(1.2, 0.6 + f.kg * 0.05);
+    c.jump = fight.jump;
+
+    // Headshakes are already a high-frequency signal in the tension; borrow it.
+    var shakeWant = Math.abs(fight.headshake) * 9 + fight.tension * 0.10;
+    c.shake = M.damp(c.shake, M.sat(shakeWant), 9, dt);
+    c.kick = Math.max(0, c.kick - dt * 2.2);
+
+    /* Aim assist. Only when the player is not aiming themselves, only outside
+       a generous dead zone, and never fast enough to feel like the camera has
+       been taken away from them. */
+    var dx = fx - s.camPos[0], dy = fy - s.camPos[1], dz = fz - s.camPos[2];
+    var wantYaw = Math.atan2(-dx, -dz);
+    var wantPitch = Math.atan2(dy, Math.hypot(dx, dz));
+    var dYaw = M.angDiff(p.yaw, wantYaw);
+    var dPitch = wantPitch - p.pitch;
+    var idle = M.sat((this.mouse.idle - 0.25) / 0.5);
+    var pull = idle * (0.6 + fight.tension * 0.5);
+    var DEAD = 0.30;
+    if (Math.abs(dYaw) > DEAD) {
+      p.yaw += Math.sign(dYaw) * Math.min(Math.abs(dYaw) - DEAD, 1.1) * pull * dt * 1.7;
+    }
+    if (Math.abs(dPitch) > DEAD * 0.8) {
+      p.pitch += Math.sign(dPitch) * Math.min(Math.abs(dPitch) - DEAD * 0.8, 0.9) * pull * dt * 1.5;
+      p.pitch = M.clamp(p.pitch, -1.45, 1.42);
+    }
+
+    // The camera itself: shake, a downward pull under load, and a lean-in.
+    var t = this.time;
+    var amp = c.shake * 0.028 + c.kick * 0.045;
+    c.yaw = Math.sin(t * 23.0) * amp * 0.8 + Math.sin(t * 9.3) * amp * 0.35;
+    c.pitch = Math.sin(t * 19.7) * amp * 0.7 - c.kick * 0.06 - fight.tension * 0.035;
+    c.roll = Math.sin(t * 13.1) * amp * 0.5;
+    c.fov = -fight.tension * 0.075 + c.kick * 0.05;   // rad; negative = lean in
+  };
+
+  // Ease everything back to neutral once the fish is gone.
+  Game.prototype.relaxFightCam = function (dt) {
+    var c = this.fightCam;
+    c.shake = M.damp(c.shake, 0, 6, dt);
+    c.kick = Math.max(0, c.kick - dt * 2.2);
+    c.yaw = M.damp(c.yaw, 0, 8, dt);
+    c.pitch = M.damp(c.pitch, 0, 8, dt);
+    c.roll = M.damp(c.roll, 0, 8, dt);
+    c.fov = M.damp(c.fov, 0, 6, dt);
+    c.lastPhase = '';
+    c.jump = 0;
   };
 
   Game.prototype.toggleSonar = function () {

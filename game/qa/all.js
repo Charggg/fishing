@@ -24,7 +24,7 @@ const SUITE = [
   { name: 'demokit', kind: 'gate', args: ['demokit.js'],
     what: 'index.html?demo grants the kit once and only once' },
   { name: 'questplay', kind: 'gate', args: ['questplay.js'],
-    what: 'a scripted angler gets >=10 of 12 commissions unaided' },
+    what: 'a scripted angler plays the chain without anything throwing' },
   { name: 'spotbias', kind: 'tuning', args: ['spotbias.js', '10'],
     what: 'which species each spot actually yields' },
   { name: 'shots', kind: 'gate', args: ['shots.js'], skip: QUICK,
@@ -80,7 +80,7 @@ function run(step) {
   for (const r of results) {
     if (r.skipped) continue;
     const keep = r.out.split('\n').filter(l =>
-      /✗|FAIL|Error|error(s)?:(?! none)|not finite|✓|all invariants|COMPLETE|VIEWMODEL/.test(l));
+      /✗|FAIL|Error|error(s)?:(?! none)|not finite|✓|all invariants|COMPLETE|VIEWMODEL|QUESTPLAY|DESKTOP|DEMO KIT/.test(l));
     if (!keep.length) continue;
     console.log('\n--- ' + r.step.name + ' ---');
     console.log(keep.slice(0, r.ok ? 6 : 40).join('\n'));

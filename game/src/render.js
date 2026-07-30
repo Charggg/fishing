@@ -616,7 +616,8 @@
     var q = this.quality;
 
     var aspect = this.width / this.height;
-    M4.perspective(this.proj, s.fov, aspect, this.near, this.far);
+    // fovBoost is the fight camera leaning in; the slider value stays untouched.
+    M4.perspective(this.proj, s.fov + (s.fovBoost || 0), aspect, this.near, this.far);
     var target = [
       s.camPos[0] + s.forward[0], s.camPos[1] + s.forward[1], s.camPos[2] + s.forward[2]
     ];

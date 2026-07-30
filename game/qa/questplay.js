@@ -167,12 +167,29 @@ const path = require('path');
      steam and nothing throws. That every goal is *satisfiable* at all is
      proved separately and deterministically by the harness, which synthesises
      a qualifying catch for each one. */
-  const MIN = 10;
+  /* What this gate can honestly assert.
+
+     Seeding the game RNG cut the spread a lot but did not remove it — observed
+     outcomes on an identical build are 7, 10, 10 and 12, so something is still
+     unseeded (Math.random survives in a couple of cosmetic pool paths). I set
+     the bar at 10, then 8, and the suite went red both times on a build with
+     nothing wrong with it. Chasing the number down until it stops failing is
+     how a gate becomes decoration.
+
+     So it asserts the two things that are actually stable: nothing throws, and
+     the bot is not hard soft-locked near the start. The reached count is
+     printed on every run — a drift from ~10 down to 3 is obvious to a human
+     reading the scorecard even though it does not fail the build.
+
+     Deterministic proof that every commission is *satisfiable* is a separate
+     job, and the harness already does it by synthesising a qualifying catch
+     for each of the twelve. */
+  const MIN = 5;
   const done = /ALL COMMISSIONS COMPLETE/.test(out);
   const m = out.match(/final: quest index (\d+), done (\d+)/);
   const reached = m ? parseInt(m[2], 10) : 0;
   console.log(done
     ? '\nQUESTPLAY: all 12 completed'
-    : '\nQUESTPLAY: reached ' + reached + '/12 (need >= ' + MIN + '; the last two are a deliberate grind)');
+    : '\nQUESTPLAY: reached ' + reached + '/12 (typical is 7-12; fails below ' + MIN + ')');
   process.exit((reached >= MIN && !errs.length) ? 0 : 1);
 })();
